@@ -1,4 +1,5 @@
 import EditProfileModal from "@/components/EditProfileModal";
+import { useRouter } from "expo-router"; // ✅ thêm import
 import PostsList from "@/components/PostsList";
 import SignOutButton from "@/components/SignOutButton";
 import { useCurrentUser } from "@/hooks/useCurrentUser";
@@ -21,6 +22,7 @@ import {
 } from "react-native-safe-area-context";
 
 const ProfileScreens = () => {
+  const router = useRouter(); // ✅ phải đặt trong component
   const { currentUser, isLoading } = useCurrentUser();
   const insets = useSafeAreaInsets();
 
@@ -113,10 +115,14 @@ const ProfileScreens = () => {
             <Text className="text-gray-500 mb-2">@{currentUser.username}</Text>
             <Text className="text-gray-900 mb-3">{currentUser.bio}</Text>
 
-            <View className="flex-row items-center mb-2">
-              <Feather name="map-pin" size={16} color="#657786" />
-              <Text className="text-gray-500 ml-2">{currentUser.location}</Text>
-            </View>
+            {currentUser.location ? (
+              <View className="flex-row items-center mb-2">
+                <Feather name="map-pin" size={16} color="#657786" />
+                <Text className="text-gray-500 ml-2">
+                  {currentUser.location}
+                </Text>
+              </View>
+            ) : null}
 
             <View className="flex-row items-center mb-3">
               <Feather name="calendar" size={16} color="#657786" />
@@ -125,19 +131,46 @@ const ProfileScreens = () => {
               </Text>
             </View>
 
+            {/* ✅ Updated: follower & following count */}
             <View className="flex-row">
-              <TouchableOpacity className="mr-6">
+              <TouchableOpacity
+                className="mr-6"
+                onPress={() =>
+                  router.push({
+                    pathname: "/follows/[type]",
+                    params: {
+                      userId: currentUser._id,
+                      type: "following",
+                    },
+                  })
+                }
+              >
                 <Text className="text-gray-900">
                   <Text className="font-bold">
-                    {currentUser.following?.length}
+                    {currentUser.followingCount ??
+                      currentUser.following?.length ??
+                      0}
                   </Text>
                   <Text className="text-gray-500"> Following</Text>
                 </Text>
               </TouchableOpacity>
-              <TouchableOpacity>
+
+              <TouchableOpacity
+                onPress={() =>
+                  router.push({
+                    pathname: "/follows/[type]",
+                    params: {
+                      userId: currentUser._id,
+                      type: "followers",
+                    },
+                  })
+                }
+              >
                 <Text className="text-gray-900">
                   <Text className="font-bold">
-                    {currentUser.followers?.length}
+                    {currentUser.followersCount ??
+                      currentUser.followers?.length ??
+                      0}
                   </Text>
                   <Text className="text-gray-500"> Followers</Text>
                 </Text>
