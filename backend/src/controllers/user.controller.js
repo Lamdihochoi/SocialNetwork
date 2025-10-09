@@ -1,38 +1,55 @@
 import asyncHandler from "express-async-handler";
 import User from "../models/user.model.js";
 import Notification from "../models/notification.model.js";
-
 import { getAuth } from "@clerk/express";
 import { clerkClient } from "@clerk/express";
 
+// ==============================
+// 🧩 Lấy thông tin profile user
+// ==============================
 export const getUserProfile = asyncHandler(async (req, res) => {
   const { username } = req.params;
-  const user = await User.findOne({ username });
+  const user = await User.findOne({ username })
+    .populate("followers", "username profilePicture")
+    .populate("following", "username profilePicture");
+
   if (!user) return res.status(404).json({ error: "User not found" });
 
-  res.status(200).json({ user });
+  res.status(200).json({
+    user,
+    followersCount: user.followers?.length || 0,
+    followingCount: user.following?.length || 0,
+  });
 });
 
+// ==============================
+// ✏️ Cập nhật hồ sơ user
+// ==============================
 export const updateProfile = asyncHandler(async (req, res) => {
   const { userId } = getAuth(req);
 
-  const user = await User.findOneAndUpdate({ clerkId: userId }, req.body, { new: true });
+  const user = await User.findOneAndUpdate({ clerkId: userId }, req.body, {
+    new: true,
+  });
 
   if (!user) return res.status(404).json({ error: "User not found" });
 
   res.status(200).json({ user });
 });
 
+// ==============================
+// 🔄 Đồng bộ user từ Clerk
+// ==============================
 export const syncUser = asyncHandler(async (req, res) => {
   const { userId } = getAuth(req);
 
-  // check if user already exists in mongodb
   const existingUser = await User.findOne({ clerkId: userId });
   if (existingUser) {
-    return res.status(200).json({ user: existingUser, message: "User already exists" });
+    return res
+      .status(200)
+      .json({ user: existingUser, message: "User already exists" });
   }
 
-  // create new user from Clerk data
   const clerkUser = await clerkClient.users.getUser(userId);
 
   const userData = {
@@ -45,34 +62,48 @@ export const syncUser = asyncHandler(async (req, res) => {
   };
 
   const user = await User.create(userData);
-
   res.status(201).json({ user, message: "User created successfully" });
 });
 
+// ==============================
+// 👤 Lấy thông tin user hiện tại
+// ==============================
 export const getCurrentUser = asyncHandler(async (req, res) => {
   const { userId } = getAuth(req);
-  const user = await User.findOne({ clerkId: userId });
+  const user = await User.findOne({ clerkId: userId })
+    .populate("followers", "username profilePicture")
+    .populate("following", "username profilePicture");
 
   if (!user) return res.status(404).json({ error: "User not found" });
 
-  res.status(200).json({ user });
+  res.status(200).json({
+    user,
+    followersCount: user.followers?.length || 0,
+    followingCount: user.following?.length || 0,
+  });
 });
 
+// ==============================
+// ➕ Follow / Unfollow User
+// ==============================
 export const followUser = asyncHandler(async (req, res) => {
   const { userId } = getAuth(req);
   const { targetUserId } = req.params;
 
-  if (userId === targetUserId) return res.status(400).json({ error: "You cannot follow yourself" });
+  if (!userId) return res.status(401).json({ error: "Unauthorized" });
+  if (userId === targetUserId)
+    return res.status(400).json({ error: "You cannot follow yourself" });
 
   const currentUser = await User.findOne({ clerkId: userId });
   const targetUser = await User.findById(targetUserId);
 
-  if (!currentUser || !targetUser) return res.status(404).json({ error: "User not found" });
+  if (!currentUser || !targetUser)
+    return res.status(404).json({ error: "User not found" });
 
   const isFollowing = currentUser.following.includes(targetUserId);
 
   if (isFollowing) {
-    // unfollow
+    // 🔸 Unfollow
     await User.findByIdAndUpdate(currentUser._id, {
       $pull: { following: targetUserId },
     });
@@ -80,7 +111,7 @@ export const followUser = asyncHandler(async (req, res) => {
       $pull: { followers: currentUser._id },
     });
   } else {
-    // follow
+    // 🔹 Follow
     await User.findByIdAndUpdate(currentUser._id, {
       $push: { following: targetUserId },
     });
@@ -88,15 +119,38 @@ export const followUser = asyncHandler(async (req, res) => {
       $push: { followers: currentUser._id },
     });
 
-    // create notification
+    // ✅ Gửi thông báo follow
     await Notification.create({
-      from: currentUser._id,
-      to: targetUserId,
+      user: targetUserId, // người nhận thông báo
+      fromUser: currentUser._id, // người follow
       type: "follow",
+      message: `${currentUser.firstName} ${currentUser.lastName} đã theo dõi bạn.`,
     });
   }
 
   res.status(200).json({
-    message: isFollowing ? "User unfollowed successfully" : "User followed successfully",
+    message: isFollowing
+      ? "User unfollowed successfully"
+      : "User followed successfully",
+    isFollowing: !isFollowing,
   });
+});
+
+// ✅ Get followers or following list
+export const getFollowList = asyncHandler(async (req, res) => {
+  const { userId } = req.params;
+  const { type } = req.query; // "followers" hoặc "following"
+
+  if (!["followers", "following"].includes(type)) {
+    return res.status(400).json({ error: "Invalid type parameter" });
+  }
+
+  const user = await User.findById(userId).populate(
+    type,
+    "firstName lastName username profilePicture"
+  );
+
+  if (!user) return res.status(404).json({ error: "User not found" });
+
+  res.status(200).json({ users: user[type] });
 });

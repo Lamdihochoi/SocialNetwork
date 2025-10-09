@@ -4,6 +4,8 @@ export interface User {
   firstName: string;
   lastName: string;
   profilePicture?: string;
+  followers?: string[]; // ✅ thêm dòng này
+  following?: string[]; // (tuỳ chọn)
 }
 
 export interface Comment {
@@ -21,6 +23,8 @@ export interface Post {
   user: User;
   likes: string[];
   comments: Comment[];
+  // ✅ thêm để fix lỗi TS
+  isFollowing?: boolean;
 }
 
 export interface Notification {

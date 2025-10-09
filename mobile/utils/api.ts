@@ -60,6 +60,16 @@ export const userApi = {
   getCurrentUser: (api: AxiosInstance) => api.get("/users/me"),
   updateProfile: (api: AxiosInstance, data: any) =>
     api.put("/users/profile", data),
+
+  // 🟢 NEW: Follow / Unfollow user
+  followUser: (api: AxiosInstance, targetUserId: string) =>
+    api.post(`/users/${targetUserId}/follow`),
+
+  getFollowList: (
+    api: AxiosInstance,
+    userId: string,
+    type: "followers" | "following"
+  ) => api.get(`/users/${userId}/follows?type=${type}`),
 };
 
 export const postApi = {

@@ -12,12 +12,20 @@ import upload from "../middleware/upload.middleware.js";
 
 const router = express.Router();
 
-// public routes
-router.get("/", getPosts);
-router.get("/:postId", getPost);
-router.get("/user/:username", getUserPosts);
+// ===============================
+// 🟢 Protected routes (đã thêm)
+// ===============================
+router.get("/", protectRoute, getPosts);
+router.get("/user/:username", protectRoute, getUserPosts);
 
-// protected proteced
+// ===============================
+// 🔹 Public routes
+// ===============================
+router.get("/:postId", getPost);
+
+// ===============================
+// 🔒 Auth-required actions
+// ===============================
 router.post("/", protectRoute, upload.single("image"), createPost);
 router.post("/:postId/like", protectRoute, likePost);
 router.delete("/:postId", protectRoute, deletePost);

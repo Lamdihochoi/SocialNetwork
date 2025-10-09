@@ -2,6 +2,8 @@ import { Post, User } from "@/types";
 import { formatDate, formatNumber } from "@/utils/formatters";
 import { AntDesign, Feather } from "@expo/vector-icons";
 import { View, Text, Alert, Image, TouchableOpacity } from "react-native";
+import { useCurrentUser } from "@/hooks/useCurrentUser";
+import { usePosts } from "@/hooks/usePosts";
 
 interface PostCardProps {
   post: Post;
@@ -20,7 +22,21 @@ const PostCard = ({
   isLiked,
   onComment,
 }: PostCardProps) => {
-  const isOwnPost = post.user._id === currentUser._id;
+  const { toggleFollow, currentUser: updatedUser } = useCurrentUser();
+  const { onUserFollowToggle } = usePosts(); // ✅ thêm để đồng bộ post
+  if (!post?.user || !updatedUser) return null;
+
+  const isOwnPost = post.user._id === updatedUser._id;
+  const isFollowing = updatedUser.following?.includes(post.user._id);
+
+  const handleFollow = async () => {
+    try {
+      await toggleFollow(post.user._id);
+      await onUserFollowToggle(); // ✅ refresh toàn bộ bài post
+    } catch (error: any) {
+      console.error("Follow error:", error.response?.data || error.message);
+    }
+  };
 
   const handleDelete = () => {
     Alert.alert("Delete Post", "Are you sure you want to delete this post?", [
@@ -42,8 +58,9 @@ const PostCard = ({
         />
 
         <View className="flex-1">
+          {/* Header */}
           <View className="flex-row items-center justify-between mb-1">
-            <View className="flex-row items-center">
+            <View className="flex-row items-center flex-wrap">
               <Text className="font-bold text-gray-900 mr-1">
                 {post.user.firstName} {post.user.lastName}
               </Text>
@@ -51,6 +68,27 @@ const PostCard = ({
                 @{post.user.username} · {formatDate(post.createdAt)}
               </Text>
             </View>
+
+            {/* 🟢 Follow Button */}
+            {!isOwnPost && (
+              <TouchableOpacity
+                onPress={handleFollow}
+                className={`px-3 py-1 rounded-full border ${
+                  isFollowing
+                    ? "border-gray-300 bg-gray-100"
+                    : "border-blue-500"
+                }`}
+              >
+                <Text
+                  className={`text-sm font-semibold ${
+                    isFollowing ? "text-gray-700" : "text-blue-500"
+                  }`}
+                >
+                  {isFollowing ? "Following" : "Follow"}
+                </Text>
+              </TouchableOpacity>
+            )}
+
             {isOwnPost && (
               <TouchableOpacity onPress={handleDelete}>
                 <Feather name="trash" size={20} color="#657786" />
@@ -58,6 +96,7 @@ const PostCard = ({
             )}
           </View>
 
+          {/* Post content */}
           {post.content && (
             <Text className="text-gray-900 text-base leading-5 mb-3">
               {post.content}
@@ -72,6 +111,7 @@ const PostCard = ({
             />
           )}
 
+          {/* Action buttons */}
           <View className="flex-row justify-between max-w-xs">
             <TouchableOpacity
               className="flex-row items-center"
@@ -99,7 +139,9 @@ const PostCard = ({
               )}
 
               <Text
-                className={`text-sm ml-2 ${isLiked ? "text-red-500" : "text-gray-500"}`}
+                className={`text-sm ml-2 ${
+                  isLiked ? "text-red-500" : "text-gray-500"
+                }`}
               >
                 {formatNumber(post.likes?.length || 0)}
               </Text>

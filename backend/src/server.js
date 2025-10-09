@@ -6,7 +6,6 @@ import userRoutes from "./routes/user.route.js";
 import postRoutes from "./routes/post.route.js";
 import commentRoutes from "./routes/comment.route.js";
 import notificationRoutes from "./routes/notification.route.js";
-
 import { ENV } from "./config/env.js";
 import { connectDB } from "./config/db.js";
 import { arcjetMiddleware } from "./middleware/arcjet.middleware.js";
@@ -38,7 +37,9 @@ const startServer = async () => {
 
     // listen for local development
     if (ENV.NODE_ENV !== "production") {
-      app.listen(ENV.PORT, () => console.log("Server is up and running on PORT:", ENV.PORT));
+      app.listen(ENV.PORT, () =>
+        console.log("Server is up and running on PORT:", ENV.PORT)
+      );
     }
   } catch (error) {
     console.error("Failed to start server:", error.message);

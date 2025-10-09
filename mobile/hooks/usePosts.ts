@@ -37,10 +37,17 @@ export const usePosts = (username?: string) => {
     },
   });
 
+  // ✅ Khi follow/unfollow ai đó, refresh lại toàn bộ bài viết
+  const onUserFollowToggle = async () => {
+    await queryClient.invalidateQueries({ queryKey: ["posts"] });
+    await queryClient.invalidateQueries({ queryKey: ["userPosts"] });
+  };
+
   const checkIsLiked = (postLikes: string[], currentUser: any) => {
     const isLiked = currentUser && postLikes.includes(currentUser._id);
     return isLiked;
   };
+
   return {
     posts: postsData || [],
     isLoading,
@@ -49,5 +56,6 @@ export const usePosts = (username?: string) => {
     toggleLike: (postId: string) => likePostMutation.mutate(postId),
     deletePost: (postId: string) => deletePostMutation.mutate(postId),
     checkIsLiked,
+    onUserFollowToggle, // ✅ thêm dòng này để PostCard gọi khi follow
   };
 };
