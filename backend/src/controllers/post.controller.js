@@ -32,7 +32,6 @@ export const getPosts = async (req, res) => {
     res.status(500).json({ error: "Failed to fetch posts" });
   }
 };
-
 export const getPost = asyncHandler(async (req, res) => {
   const { postId } = req.params;
 
@@ -82,7 +81,6 @@ export const getUserPosts = async (req, res) => {
     res.status(500).json({ error: "Failed to fetch user posts" });
   }
 };
-
 export const createPost = asyncHandler(async (req, res) => {
   const { userId } = getAuth(req);
   const { content } = req.body;

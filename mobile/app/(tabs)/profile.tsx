@@ -1,5 +1,4 @@
 import EditProfileModal from "@/components/EditProfileModal";
-import { useRouter } from "expo-router"; // ✅ thêm import
 import PostsList from "@/components/PostsList";
 import SignOutButton from "@/components/SignOutButton";
 import { useCurrentUser } from "@/hooks/useCurrentUser";
@@ -22,7 +21,6 @@ import {
 } from "react-native-safe-area-context";
 
 const ProfileScreens = () => {
-  const router = useRouter(); // ✅ phải đặt trong component
   const { currentUser, isLoading } = useCurrentUser();
   const insets = useSafeAreaInsets();
 
@@ -133,18 +131,7 @@ const ProfileScreens = () => {
 
             {/* ✅ Updated: follower & following count */}
             <View className="flex-row">
-              <TouchableOpacity
-                className="mr-6"
-                onPress={() =>
-                  router.push({
-                    pathname: "/follows/[type]",
-                    params: {
-                      userId: currentUser._id,
-                      type: "following",
-                    },
-                  })
-                }
-              >
+              <TouchableOpacity className="mr-6">
                 <Text className="text-gray-900">
                   <Text className="font-bold">
                     {currentUser.followingCount ??
@@ -154,18 +141,7 @@ const ProfileScreens = () => {
                   <Text className="text-gray-500"> Following</Text>
                 </Text>
               </TouchableOpacity>
-
-              <TouchableOpacity
-                onPress={() =>
-                  router.push({
-                    pathname: "/follows/[type]",
-                    params: {
-                      userId: currentUser._id,
-                      type: "followers",
-                    },
-                  })
-                }
-              >
+              <TouchableOpacity>
                 <Text className="text-gray-900">
                   <Text className="font-bold">
                     {currentUser.followersCount ??
