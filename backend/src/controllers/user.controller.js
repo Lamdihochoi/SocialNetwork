@@ -90,30 +90,27 @@ export const followUser = asyncHandler(async (req, res) => {
   const { userId } = getAuth(req); // Clerk userId
   const { userId: targetUserId } = req.params;
 
-  // Debug: Log để kiểm tra input
-  console.log("Clerk userId:", userId);
-  console.log("Target userId:", targetUserId);
-
-  // Tìm user
   const user = await User.findOne({ clerkId: userId });
-  const targetUser = await User.findById(targetUserId);
+
+  // ✅ Hỗ trợ cả Mongo _id và Clerk ID
+  let targetUser = await User.findById(targetUserId);
+  if (!targetUser) {
+    targetUser = await User.findOne({ clerkId: targetUserId });
+  }
 
   if (!user) {
     console.error("Current user not found for clerkId:", userId);
     return res.status(404).json({ error: "Current user not found" });
   }
+
   if (!targetUser) {
     console.error("Target user not found for id:", targetUserId);
     return res.status(404).json({ error: "Target user not found" });
   }
 
-  console.log("Current user _id:", user._id);
-  console.log("Target user _id:", targetUser._id);
-
   const isFollowing = user.following.includes(targetUser._id.toString());
 
   if (isFollowing) {
-    // Unfollow
     await User.updateOne(
       { _id: user._id },
       { $pull: { following: targetUser._id } }
@@ -123,7 +120,6 @@ export const followUser = asyncHandler(async (req, res) => {
       { $pull: { followers: user._id } }
     );
   } else {
-    // Follow
     await User.updateOne(
       { _id: user._id },
       { $push: { following: targetUser._id } }
@@ -133,7 +129,6 @@ export const followUser = asyncHandler(async (req, res) => {
       { $push: { followers: user._id } }
     );
 
-    // Tạo notification
     await Notification.create({
       from: user._id,
       to: targetUser._id,
@@ -141,13 +136,9 @@ export const followUser = asyncHandler(async (req, res) => {
     });
   }
 
-  res
-    .status(200)
-    .json({
-      message: isFollowing
-        ? "Unfollowed successfully"
-        : "Followed successfully",
-    });
+  res.status(200).json({
+    message: isFollowing ? "Unfollowed successfully" : "Followed successfully",
+  });
 });
 
 // ✅ Get followers or following list
