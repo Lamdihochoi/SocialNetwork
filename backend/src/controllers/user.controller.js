@@ -87,53 +87,67 @@ export const getCurrentUser = asyncHandler(async (req, res) => {
 // ➕ Follow / Unfollow User
 // ==============================
 export const followUser = asyncHandler(async (req, res) => {
-  const { userId } = getAuth(req);
-  const { targetUserId } = req.params;
+  const { userId } = getAuth(req); // Clerk userId
+  const { userId: targetUserId } = req.params;
 
-  if (!userId) return res.status(401).json({ error: "Unauthorized" });
-  if (userId === targetUserId)
-    return res.status(400).json({ error: "You cannot follow yourself" });
+  // Debug: Log để kiểm tra input
+  console.log("Clerk userId:", userId);
+  console.log("Target userId:", targetUserId);
 
-  const currentUser = await User.findOne({ clerkId: userId });
+  // Tìm user
+  const user = await User.findOne({ clerkId: userId });
   const targetUser = await User.findById(targetUserId);
 
-  if (!currentUser || !targetUser)
-    return res.status(404).json({ error: "User not found" });
+  if (!user) {
+    console.error("Current user not found for clerkId:", userId);
+    return res.status(404).json({ error: "Current user not found" });
+  }
+  if (!targetUser) {
+    console.error("Target user not found for id:", targetUserId);
+    return res.status(404).json({ error: "Target user not found" });
+  }
 
-  const isFollowing = currentUser.following.includes(targetUserId);
+  console.log("Current user _id:", user._id);
+  console.log("Target user _id:", targetUser._id);
+
+  const isFollowing = user.following.includes(targetUser._id.toString());
 
   if (isFollowing) {
-    // 🔸 Unfollow
-    await User.findByIdAndUpdate(currentUser._id, {
-      $pull: { following: targetUserId },
-    });
-    await User.findByIdAndUpdate(targetUserId, {
-      $pull: { followers: currentUser._id },
-    });
+    // Unfollow
+    await User.updateOne(
+      { _id: user._id },
+      { $pull: { following: targetUser._id } }
+    );
+    await User.updateOne(
+      { _id: targetUser._id },
+      { $pull: { followers: user._id } }
+    );
   } else {
-    // 🔹 Follow
-    await User.findByIdAndUpdate(currentUser._id, {
-      $push: { following: targetUserId },
-    });
-    await User.findByIdAndUpdate(targetUserId, {
-      $push: { followers: currentUser._id },
-    });
+    // Follow
+    await User.updateOne(
+      { _id: user._id },
+      { $push: { following: targetUser._id } }
+    );
+    await User.updateOne(
+      { _id: targetUser._id },
+      { $push: { followers: user._id } }
+    );
 
-    // ✅ Gửi thông báo follow
+    // Tạo notification
     await Notification.create({
-      user: targetUserId, // người nhận thông báo
-      fromUser: currentUser._id, // người follow
+      from: user._id,
+      to: targetUser._id,
       type: "follow",
-      message: `${currentUser.firstName} ${currentUser.lastName} đã theo dõi bạn.`,
     });
   }
 
-  res.status(200).json({
-    message: isFollowing
-      ? "User unfollowed successfully"
-      : "User followed successfully",
-    isFollowing: !isFollowing,
-  });
+  res
+    .status(200)
+    .json({
+      message: isFollowing
+        ? "Unfollowed successfully"
+        : "Followed successfully",
+    });
 });
 
 // ✅ Get followers or following list
