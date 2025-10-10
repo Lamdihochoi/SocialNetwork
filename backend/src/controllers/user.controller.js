@@ -87,30 +87,44 @@ export const getCurrentUser = asyncHandler(async (req, res) => {
 // ➕ Follow / Unfollow User
 // ==============================
 export const followUser = asyncHandler(async (req, res) => {
-  const { userId } = getAuth(req); // Clerk userId
-  const { userId: targetUserId } = req.params;
+  const { userId } = getAuth(req); // Clerk userId của người đang đăng nhập
+  const { userId: targetUserId } = req.params; // ID của người cần follow
 
+  // 🧩 Ghi log để debug
+  console.log("======== FOLLOW DEBUG ========");
+  console.log("👤 Clerk userId:", userId);
+  console.log("🎯 Target userId (từ frontend):", targetUserId);
+
+  // ✅ Tìm user hiện tại theo clerkId
   const user = await User.findOne({ clerkId: userId });
 
-  // ✅ Hỗ trợ cả Mongo _id và Clerk ID
+  // ✅ Tìm người bị follow: thử bằng _id, nếu không thấy thì thử clerkId
   let targetUser = await User.findById(targetUserId);
   if (!targetUser) {
+    console.log("❌ Không tìm thấy bằng _id, thử tìm theo clerkId...");
     targetUser = await User.findOne({ clerkId: targetUserId });
   }
 
+  // ❌ Nếu vẫn không thấy, in toàn bộ user trong DB ra để kiểm tra
+  if (!targetUser) {
+    console.log("⚠️ Không tìm thấy targetUser. Danh sách user hiện có:");
+    const allUsers = await User.find({}, "_id username clerkId email");
+    console.table(allUsers);
+    return res.status(404).json({ error: "Target user not found" });
+  }
+
   if (!user) {
-    console.error("Current user not found for clerkId:", userId);
+    console.error("❌ Current user not found for clerkId:", userId);
     return res.status(404).json({ error: "Current user not found" });
   }
 
-  if (!targetUser) {
-    console.error("Target user not found for id:", targetUserId);
-    return res.status(404).json({ error: "Target user not found" });
-  }
+  console.log("✅ Current user _id:", user._id);
+  console.log("✅ Target user _id:", targetUser._id);
 
   const isFollowing = user.following.includes(targetUser._id.toString());
 
   if (isFollowing) {
+    console.log("🔄 Đang unfollow...");
     await User.updateOne(
       { _id: user._id },
       { $pull: { following: targetUser._id } }
@@ -120,6 +134,7 @@ export const followUser = asyncHandler(async (req, res) => {
       { $pull: { followers: user._id } }
     );
   } else {
+    console.log("➕ Đang follow...");
     await User.updateOne(
       { _id: user._id },
       { $push: { following: targetUser._id } }
@@ -135,6 +150,9 @@ export const followUser = asyncHandler(async (req, res) => {
       type: "follow",
     });
   }
+
+  console.log("✅ Follow xử lý xong.");
+  console.log("=============================");
 
   res.status(200).json({
     message: isFollowing ? "Unfollowed successfully" : "Followed successfully",
