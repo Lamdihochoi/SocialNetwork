@@ -1,5 +1,6 @@
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { useState } from "react";
 import {
   View,
   Text,
@@ -13,6 +14,8 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { Feather } from "@expo/vector-icons";
 import { useApiClient, userApi } from "@/utils/api";
 import { useCurrentUser } from "@/hooks/useCurrentUser";
+import PostsList from "@/components/PostsList";
+import FollowListModal from "@/components/FollowListModal";
 
 function UserProfileScreen() {
   const { username } = useLocalSearchParams<{ username: string }>();
@@ -20,6 +23,11 @@ function UserProfileScreen() {
   const api = useApiClient();
   const queryClient = useQueryClient();
   const { currentUser } = useCurrentUser();
+  const [followModalVisible, setFollowModalVisible] = useState(false);
+  const [followModalType, setFollowModalType] = useState<"followers" | "following">("followers");
+
+  // 🧩 Detect if param is ID (24 char hex) or username
+  const isId = username && username.length === 24 && /^[0-9a-fA-F]{24}$/.test(username);
 
   // 🧩 Lấy dữ liệu profile
   const {
@@ -30,7 +38,10 @@ function UserProfileScreen() {
   } = useQuery({
     queryKey: ["userProfile", username],
     queryFn: async () => {
-      const res = await api.get(`/users/profile/${username}`);
+      // Use ID endpoint if it's an ID, otherwise use username endpoint
+      const res = isId
+        ? await userApi.getUserById(api, username)
+        : await api.get(`/users/profile/${username}`);
       return res.data.user;
     },
     enabled: !!username,
@@ -60,9 +71,24 @@ function UserProfileScreen() {
       </View>
     );
 
+  // Check if current user follows this user
   const isFollowing = user.followers?.some(
-    (f: any) => f._id === currentUser?._id
+    (f: any) => {
+      const followerId = typeof f === "string" ? f : f._id;
+      return followerId === currentUser?._id;
+    }
   );
+
+  // Check if this user follows current user (for mutual follow check)
+  const isFollowedBy = user.following?.some(
+    (f: any) => {
+      const followingId = typeof f === "string" ? f : f._id;
+      return followingId === currentUser?._id;
+    }
+  );
+
+  // Check if mutual follow (both follow each other)
+  const isMutualFollow = isFollowing && isFollowedBy;
 
   return (
     <SafeAreaView className="flex-1 bg-white">
@@ -131,11 +157,10 @@ function UserProfileScreen() {
           <View className="flex-row mb-3">
             <TouchableOpacity
               className="mr-6"
-              onPress={() =>
-                router.push(
-                  `/follows/following?userId=${user._id}&type=following`
-                )
-              }
+              onPress={() => {
+                setFollowModalType("following");
+                setFollowModalVisible(true);
+              }}
             >
               <Text className="text-gray-900">
                 <Text className="font-bold">{user.following?.length || 0}</Text>
@@ -144,11 +169,10 @@ function UserProfileScreen() {
             </TouchableOpacity>
 
             <TouchableOpacity
-              onPress={() =>
-                router.push(
-                  `/follows/followers?userId=${user._id}&type=followers`
-                )
-              }
+              onPress={() => {
+                setFollowModalType("followers");
+                setFollowModalVisible(true);
+              }}
             >
               <Text className="text-gray-900">
                 <Text className="font-bold">{user.followers?.length || 0}</Text>
@@ -157,7 +181,34 @@ function UserProfileScreen() {
             </TouchableOpacity>
           </View>
         </View>
+
+        {/* ✅ Feature 1: Hiển thị bài viết nếu là Mutual Follow */}
+        {isMutualFollow && (
+          <View className="mt-4">
+            <PostsList username={user.username} />
+          </View>
+        )}
+
+        {/* Hiển thị thông báo nếu chưa mutual follow */}
+        {!isMutualFollow && currentUser?._id !== user._id && (
+          <View className="px-4 py-8 items-center">
+            <Text className="text-gray-500 text-center">
+              Follow each other to see posts
+            </Text>
+          </View>
+        )}
       </ScrollView>
+
+      {/* Followers/Following Modal */}
+      {user?._id && (
+        <FollowListModal
+          visible={followModalVisible}
+          onClose={() => setFollowModalVisible(false)}
+          userId={user._id}
+          type={followModalType}
+          title={followModalType === "followers" ? "Followers" : "Following"}
+        />
+      )}
     </SafeAreaView>
   );
 }

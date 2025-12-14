@@ -1,7 +1,6 @@
 import asyncHandler from "express-async-handler";
 import Post from "../models/post.model.js";
 import User from "../models/user.model.js";
-import { getAuth } from "@clerk/express";
 import cloudinary from "../config/cloudinary.js";
 
 import Notification from "../models/notification.model.js";
@@ -82,7 +81,6 @@ export const getUserPosts = async (req, res) => {
   }
 };
 export const createPost = asyncHandler(async (req, res) => {
-  const { userId } = getAuth(req);
   const { content } = req.body;
   const imageFile = req.file;
 
@@ -92,7 +90,8 @@ export const createPost = asyncHandler(async (req, res) => {
       .json({ error: "Post must contain either text or image" });
   }
 
-  const user = await User.findOne({ clerkId: userId });
+  // Use req.user from middleware
+  const user = req.user;
   if (!user) return res.status(404).json({ error: "User not found" });
 
   let imageUrl = "";
@@ -131,10 +130,10 @@ export const createPost = asyncHandler(async (req, res) => {
 });
 
 export const likePost = asyncHandler(async (req, res) => {
-  const { userId } = getAuth(req);
   const { postId } = req.params;
 
-  const user = await User.findOne({ clerkId: userId });
+  // Use req.user from middleware
+  const user = req.user;
   const post = await Post.findById(postId);
 
   if (!user || !post)
@@ -170,10 +169,10 @@ export const likePost = asyncHandler(async (req, res) => {
 });
 
 export const deletePost = asyncHandler(async (req, res) => {
-  const { userId } = getAuth(req);
   const { postId } = req.params;
 
-  const user = await User.findOne({ clerkId: userId });
+  // Use req.user from middleware
+  const user = req.user;
   const post = await Post.findById(postId);
 
   if (!user || !post)
@@ -192,4 +191,98 @@ export const deletePost = asyncHandler(async (req, res) => {
   await Post.findByIdAndDelete(postId);
 
   res.status(200).json({ message: "Post deleted successfully" });
+});
+
+// ==============================
+// 🔍 Universal Search (Posts & Users)
+// ==============================
+export const searchPosts = asyncHandler(async (req, res) => {
+  const { q } = req.query;
+
+  if (!q || q.trim().length === 0) {
+    return res.status(400).json({ error: "Search query is required" });
+  }
+
+  try {
+    const query = q.trim();
+    const isUserSearch = query.startsWith("@");
+    const searchTerm = isUserSearch ? query.substring(1) : query;
+
+    if (isUserSearch && searchTerm.length > 0) {
+      // Search for Users by username, firstName, or lastName
+      const users = await User.find({
+        $or: [
+          { username: { $regex: searchTerm, $options: "i" } },
+          { firstName: { $regex: searchTerm, $options: "i" } },
+          { lastName: { $regex: searchTerm, $options: "i" } },
+        ],
+      })
+        .select("username firstName lastName profilePicture followers")
+        .limit(50);
+
+      // Add isFollowing field if user is authenticated
+      const userId = req.user?._id?.toString();
+      const formatted = users.map((user) => {
+        const userObj = user.toObject();
+        const followers = userObj.followers || [];
+        userObj.isFollowing = followers.some((f) => {
+          const followerId = typeof f === "string" ? f : f._id?.toString();
+          return followerId === userId;
+        });
+        return userObj;
+      });
+
+      return res.status(200).json({ type: "users", results: formatted });
+    } else {
+      // Search for Posts by content
+      const posts = await Post.find({
+        content: { $regex: searchTerm, $options: "i" },
+      })
+        .populate("user", "username firstName lastName profilePicture followers")
+        .populate({
+          path: "comments",
+          populate: { path: "user", select: "username profilePicture" },
+        })
+        .sort({ createdAt: -1 });
+
+      // Add isFollowing field if user is authenticated
+      const userId = req.user?._id?.toString();
+      const formatted = posts.map((post) => {
+        const postObj = post.toObject();
+        const followers = postObj.user.followers || [];
+        postObj.isFollowing = followers.some((f) => {
+          const followerId = typeof f === "string" ? f : f._id?.toString();
+          return followerId === userId;
+        });
+        return postObj;
+      });
+
+      return res.status(200).json({ type: "posts", results: formatted });
+    }
+  } catch (error) {
+    console.error("searchPosts error:", error);
+    res.status(500).json({ error: "Failed to search" });
+  }
+});
+
+// ==============================
+// 🔍 Lấy chi tiết 1 bài viết (kèm comment)
+// ==============================
+export const getPostById = asyncHandler(async (req, res) => {
+  const post = await Post.findById(req.params.id)
+    .populate("user", "username firstName lastName profilePicture") // Lấy thông tin tác giả
+    .populate({
+      path: "comments",
+      populate: {
+        path: "user",
+        select: "username firstName lastName profilePicture", // Lấy thông tin người cmt
+      },
+      options: { sort: { createdAt: -1 } }, // Comment mới nhất lên đầu
+    });
+
+  if (!post) {
+    return res.status(404).json({ error: "Post not found" });
+  }
+
+  res.status(200).json(post);
 });

@@ -23,12 +23,29 @@ export const getUserProfile = asyncHandler(async (req, res) => {
 });
 
 // ==============================
+// 🧩 Lấy thông tin profile user by ID
+// ==============================
+export const getUserById = asyncHandler(async (req, res) => {
+  const { id } = req.params;
+  const user = await User.findById(id)
+    .populate("followers", "username profilePicture")
+    .populate("following", "username profilePicture");
+
+  if (!user) return res.status(404).json({ error: "User not found" });
+
+  res.status(200).json({
+    user,
+    followersCount: user.followers?.length || 0,
+    followingCount: user.following?.length || 0,
+  });
+});
+
+// ==============================
 // ✏️ Cập nhật hồ sơ user
 // ==============================
 export const updateProfile = asyncHandler(async (req, res) => {
-  const { userId } = getAuth(req);
-
-  const user = await User.findOneAndUpdate({ clerkId: userId }, req.body, {
+  // Use req.user from middleware
+  const user = await User.findByIdAndUpdate(req.user._id, req.body, {
     new: true,
   });
 
@@ -69,8 +86,8 @@ export const syncUser = asyncHandler(async (req, res) => {
 // 👤 Lấy thông tin user hiện tại
 // ==============================
 export const getCurrentUser = asyncHandler(async (req, res) => {
-  const { userId } = getAuth(req);
-  const user = await User.findOne({ clerkId: userId })
+  // Use req.user from middleware and populate it
+  const user = await User.findById(req.user._id)
     .populate("followers", "username profilePicture")
     .populate("following", "username profilePicture");
 
@@ -84,74 +101,92 @@ export const getCurrentUser = asyncHandler(async (req, res) => {
 });
 
 // ==============================
-// ➕ Follow / Unfollow User
+// ➕ Follow / Unfollow User (ĐÃ SỬA FIX BUG)
 // ==============================
 export const followUser = asyncHandler(async (req, res) => {
-  const { userId } = getAuth(req); // Clerk userId của người đang đăng nhập
-  const { userId: targetUserId } = req.params; // ID của người cần follow
+  // ✅ SỬA: Lấy id hoặc userId đều được (phòng trường hợp route đặt tên khác nhau)
+  let targetUserId = req.params.userId || req.params.id;
+
+  // Kiểm tra nếu không có ID thì báo lỗi ngay thay vì crash
+  if (!targetUserId) {
+    return res.status(400).json({ error: "Missing user ID in URL" });
+  }
+
+  // Bây giờ mới trim() an toàn
+  targetUserId = targetUserId.trim();
 
   // 🧩 Ghi log để debug
   console.log("======== FOLLOW DEBUG ========");
-  console.log("👤 Clerk userId:", userId);
-  console.log("🎯 Target userId (từ frontend):", targetUserId);
+  console.log("👤 Current User ID:", req.user._id);
+  console.log("🎯 Target User ID (from params):", targetUserId);
 
-  // ✅ Tìm user hiện tại theo clerkId
-  const user = await User.findOne({ clerkId: userId });
+  // Use req.user from middleware
+  const currentUser = req.user;
 
-  // ✅ Tìm người bị follow: thử bằng _id, nếu không thấy thì thử clerkId
+  // 2. Kiểm tra không cho phép tự follow chính mình
+  if (currentUser._id.toString() === targetUserId) {
+    return res.status(400).json({ error: "You cannot follow yourself" });
+  }
+
+  // 3. Tìm người bị follow
   let targetUser = await User.findById(targetUserId);
+
+  // Fallback: Tìm bằng clerkId nếu tìm bằng _id thất bại
   if (!targetUser) {
-    console.log("❌ Không tìm thấy bằng _id, thử tìm theo clerkId...");
+    console.log("⚠️ Không tìm thấy bằng _id, đang thử tìm bằng clerkId...");
     targetUser = await User.findOne({ clerkId: targetUserId });
   }
 
-  // ❌ Nếu vẫn không thấy, in toàn bộ user trong DB ra để kiểm tra
+  // ❌ Nếu vẫn không thấy => CHẮC CHẮN LÀ USER MA
   if (!targetUser) {
-    console.log("⚠️ Không tìm thấy targetUser. Danh sách user hiện có:");
-    const allUsers = await User.find({}, "_id username clerkId email");
-    console.table(allUsers);
+    console.log("❌ LỖI: Target user hoàn toàn không tồn tại trong DB Users.");
+    console.log(
+      "👉 Gợi ý: Hãy xóa bài Post chứa ID này đi vì tác giả đã bị xóa."
+    );
     return res.status(404).json({ error: "Target user not found" });
   }
 
-  if (!user) {
-    console.error("❌ Current user not found for clerkId:", userId);
-    return res.status(404).json({ error: "Current user not found" });
-  }
+  console.log(
+    "✅ Tìm thấy Target User:",
+    targetUser.username,
+    "| ID:",
+    targetUser._id
+  );
 
-  console.log("✅ Current user _id:", user._id);
-  console.log("✅ Target user _id:", targetUser._id);
-
-  const isFollowing = user.following.includes(targetUser._id.toString());
+  // 4. Kiểm tra xem đã follow chưa (Sửa lỗi logic .includes cũ)
+  // Dùng .some để so sánh ObjectId an toàn hơn
+  const isFollowing = currentUser.following.some(
+    (id) => id.toString() === targetUser._id.toString()
+  );
 
   if (isFollowing) {
-    console.log("🔄 Đang unfollow...");
-    await User.updateOne(
-      { _id: user._id },
-      { $pull: { following: targetUser._id } }
-    );
-    await User.updateOne(
-      { _id: targetUser._id },
-      { $pull: { followers: user._id } }
-    );
+    console.log("🔄 Đang Unfollow...");
+    // Unfollow
+    await User.findByIdAndUpdate(currentUser._id, {
+      $pull: { following: targetUser._id },
+    });
+    await User.findByIdAndUpdate(targetUser._id, {
+      $pull: { followers: currentUser._id },
+    });
   } else {
-    console.log("➕ Đang follow...");
-    await User.updateOne(
-      { _id: user._id },
-      { $push: { following: targetUser._id } }
-    );
-    await User.updateOne(
-      { _id: targetUser._id },
-      { $push: { followers: user._id } }
-    );
+    console.log("➕ Đang Follow...");
+    // Follow
+    await User.findByIdAndUpdate(currentUser._id, {
+      $push: { following: targetUser._id },
+    });
+    await User.findByIdAndUpdate(targetUser._id, {
+      $push: { followers: currentUser._id },
+    });
 
+    // Gửi thông báo (chỉ tạo nếu không phải là unfollow)
     await Notification.create({
-      from: user._id,
+      from: currentUser._id,
       to: targetUser._id,
       type: "follow",
     });
   }
 
-  console.log("✅ Follow xử lý xong.");
+  console.log("✅ Xử lý xong thành công!");
   console.log("=============================");
 
   res.status(200).json({
@@ -176,4 +211,46 @@ export const getFollowList = asyncHandler(async (req, res) => {
   if (!user) return res.status(404).json({ error: "User not found" });
 
   res.status(200).json({ users: user[type] });
+});
+
+// ==============================
+// 👥 Get Mutual Follows (Friends)
+// ==============================
+export const getMutualFollows = asyncHandler(async (req, res) => {
+  const currentUser = req.user;
+
+  // Get current user (don't populate to get raw ObjectIds for better performance)
+  const currentUserDoc = await User.findById(currentUser._id).select(
+    "following followers"
+  );
+
+  if (!currentUserDoc) {
+    return res.status(404).json({ error: "User not found" });
+  }
+
+  // Convert to string arrays for comparison
+  const followingIds = (currentUserDoc.following || []).map((id) =>
+    id.toString()
+  );
+  const followersIds = (currentUserDoc.followers || []).map((id) =>
+    id.toString()
+  );
+
+  // Find intersection: users who are in BOTH following AND followers
+  // This means: A follows B AND B follows A (mutual follow)
+  const mutualFollowIds = followingIds.filter((id) =>
+    followersIds.includes(id)
+  );
+
+  if (mutualFollowIds.length === 0) {
+    return res.status(200).json({ friends: [] });
+  }
+
+  // Fetch full user details for mutual follows
+  const friends = await User.find({
+    _id: { $in: mutualFollowIds },
+  }).select("username firstName lastName profilePicture _id");
+
+  // Return as "friends" to match frontend expectation
+  res.status(200).json({ friends });
 });
