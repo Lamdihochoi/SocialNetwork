@@ -1,5 +1,5 @@
-import { Feather } from "@expo/vector-icons";
-import { useState, useEffect, useRef } from "react";
+import { Feather, Ionicons } from "@expo/vector-icons";
+import React, { useState, useEffect, useRef, useMemo, useCallback } from "react";
 import {
   View,
   Text,
@@ -26,8 +26,10 @@ import { formatDate } from "@/utils/formatters";
 import * as ImagePicker from "expo-image-picker";
 import * as DocumentPicker from "expo-document-picker";
 import ImageViewing from "react-native-image-viewing";
-import * as FileSystem from "expo-file-system";
-import * as MediaLibrary from "expo-media-library";
+// Use legacy API for Expo SDK 54+ compatibility
+import * as FileSystem from "expo-file-system/legacy";
+// E2E Encryption
+import { encryptMessage, decryptMessage } from "@/utils/encryption";
 
 const MessagesScreen = () => {
   const insets = useSafeAreaInsets();
@@ -121,22 +123,62 @@ const MessagesScreen = () => {
       content: string;
       file?: { uri: string; type: string; name: string };
     }) => messageApi.sendMessage(api, receiverId, content, file),
-    onSuccess: () => {
+    
+    // 🚀 OPTIMISTIC UPDATE: Update UI immediately before server response
+    onMutate: async ({ receiverId, content, file }) => {
+      // Cancel any outgoing refetches (so they don't overwrite our optimistic update)
+      await queryClient.cancelQueries({ queryKey: ["messageHistory", receiverId] });
+
+      // Snapshot the previous value
+      const previousData = queryClient.getQueryData(["messageHistory", receiverId]);
+
+      // Create optimistic message
+      const optimisticMessage = {
+        _id: "temp-" + Date.now(),
+        sender: currentUser,
+        receiver: { _id: receiverId },
+        content: content,
+        attachment: file ? { url: file.uri, type: file.type, fileName: file.name } : null,
+        createdAt: new Date().toISOString(),
+        isRead: false,
+        pending: true, // Marker to show "Sending..." state if needed
+      };
+
+      // Optimistically update to the new value
+      queryClient.setQueryData(["messageHistory", receiverId], (old: any) => {
+        const oldMessages = old?.messages || [];
+        return {
+          ...old,
+          messages: [...oldMessages, optimisticMessage],
+        };
+      });
+
+      // Clear input immediately for smooth experience
       setNewMessage("");
       setSelectedFile(null);
-      // Invalidate both queries to refresh chat and conversation list
+
+      // Return a context object with the snapshotted value
+      return { previousData };
+    },
+
+    onError: (err, newTodo, context: any) => {
+      // Rollback to the previous value on error
+      if (context?.previousData) {
+        queryClient.setQueryData(["messageHistory", selectedOtherUserId], context.previousData);
+      }
+      Alert.alert(
+        "Lỗi gửi tin nhắn",
+        (err as any).response?.data?.error || "Không thể gửi tin nhắn"
+      );
+    },
+
+    onSettled: () => {
+      // Always refetch after error or success to ensure data sync
       queryClient.invalidateQueries({
         queryKey: ["messageHistory", selectedOtherUserId],
       });
       queryClient.invalidateQueries({ queryKey: ["conversations"] });
-      // Refresh friends list because a new conversation might have been created
       queryClient.invalidateQueries({ queryKey: ["friends"] });
-    },
-    onError: (error: any) => {
-      Alert.alert(
-        "Error",
-        error.response?.data?.error || "Failed to send message"
-      );
     },
   });
 
@@ -184,15 +226,21 @@ const MessagesScreen = () => {
     queryClient.invalidateQueries({ queryKey: ["conversations"] });
   };
 
-  const sendMessage = () => {
+  // Send message with encryption
+  const sendMessage = useCallback(() => {
     if ((newMessage.trim() || selectedFile) && selectedOtherUserId) {
+      // Encrypt message content before sending
+      const encryptedContent = newMessage.trim() 
+        ? encryptMessage(newMessage.trim()) 
+        : "";
+      
       sendMessageMutation.mutate({
         receiverId: selectedOtherUserId,
-        content: newMessage.trim(),
+        content: encryptedContent,
         file: selectedFile || undefined,
       });
     }
-  };
+  }, [newMessage, selectedFile, selectedOtherUserId, sendMessageMutation]);
 
   const pickImage = async () => {
     const result = await ImagePicker.launchImageLibraryAsync({
@@ -269,45 +317,43 @@ const MessagesScreen = () => {
     }));
 
     // Tìm index của ảnh được click
-    const currentIndex = imageUrls.findIndex((img) => img.uri === imageUrl);
+    const currentIndex = imageUrls.findIndex(
+      (img: { uri: string }) => img.uri === imageUrl
+    );
     setImageViewerIndex(currentIndex >= 0 ? currentIndex : 0);
     setImageViewerVisible(true);
   };
 
-  // ✅ TẢI FILE (Ảnh hoặc Tài liệu)
+  // ✅ TẢI FILE (Ảnh hoặc Tài liệu) - Expo Go compatible with Share sheet
   const handleDownload = async (
     url: string,
     fileName: string,
     isImage: boolean
   ) => {
     try {
-      // Request permissions
-      if (isImage) {
-        const { status } = await MediaLibrary.requestPermissionsAsync();
-        if (status !== "granted") {
-          Alert.alert(
-            "Permission Required",
-            "Please grant permission to save images to your gallery."
-          );
-          return;
-        }
-      }
-
-      // Download file
-      const fileUri = FileSystem.documentDirectory + fileName;
+      // Download file to cache
+      const fileUri = (FileSystem as any).cacheDirectory + fileName;
       const downloadResult = await FileSystem.downloadAsync(url, fileUri);
 
-      if (isImage) {
-        // Save to media library
-        await MediaLibrary.createAssetAsync(downloadResult.uri);
-        Alert.alert("Success", "Image saved to gallery!");
+      if (downloadResult.status === 200) {
+        // Check if sharing is available
+        const Sharing = await import("expo-sharing");
+        const isAvailable = await Sharing.isAvailableAsync();
+        
+        if (isAvailable) {
+          await Sharing.shareAsync(downloadResult.uri, {
+            mimeType: isImage ? "image/jpeg" : "application/octet-stream",
+            dialogTitle: isImage ? "Lưu ảnh" : "Lưu tài liệu",
+          });
+        } else {
+          Alert.alert("Lỗi", "Không thể chia sẻ file trên thiết bị này.");
+        }
       } else {
-        // For documents, show success message
-        Alert.alert("Success", `File downloaded: ${fileName}`);
+        throw new Error("Download failed");
       }
     } catch (error: any) {
       console.error("Download error:", error);
-      Alert.alert("Error", "Failed to download file. Please try again.");
+      Alert.alert("Lỗi", "Không thể tải file. Vui lòng thử lại.");
     }
   };
 
@@ -341,32 +387,51 @@ const MessagesScreen = () => {
   });
 
   return (
-    <SafeAreaView className="flex-1 bg-white" edges={["top"]}>
-      {/* HEADER */}
-      <View className="flex-row items-center justify-between px-4 py-3 border-b border-gray-100">
-        <Text className="text-xl font-bold text-gray-900">Messages</Text>
-        <TouchableOpacity
-          // ✅ Nút EDIT/START NEW CHAT
-          onPress={() => {
-            setIsNewMessageModalOpen(true);
-            refetchMutualFollows();
-          }}
-        >
-          <Feather name="edit" size={24} color="#1DA1F2" />
-        </TouchableOpacity>
+    <SafeAreaView className="flex-1 bg-gray-50" edges={["top"]}>
+      {/* MESSENGER-STYLE HEADER */}
+      <View className="bg-white px-4 py-3" style={{
+        shadowColor: "#000",
+        shadowOffset: { width: 0, height: 1 },
+        shadowOpacity: 0.05,
+        shadowRadius: 8,
+        elevation: 2,
+      }}>
+        <View className="flex-row items-center justify-between">
+          <View className="flex-row items-center">
+            <View className="w-10 h-10 bg-gradient-to-br rounded-xl items-center justify-center" 
+              style={{ backgroundColor: "#0084ff" }}>
+              <Ionicons name="chatbubbles" size={22} color="white" />
+            </View>
+            <Text className="text-xl font-bold text-gray-900 ml-3">Đoạn chat</Text>
+          </View>
+          <TouchableOpacity
+            onPress={() => {
+              setIsNewMessageModalOpen(true);
+              refetchMutualFollows();
+            }}
+            className="w-10 h-10 bg-gray-100 rounded-full items-center justify-center"
+          >
+            <Ionicons name="create-outline" size={22} color="#0084ff" />
+          </TouchableOpacity>
+        </View>
       </View>
 
       {/* Search Bar */}
-      <View className="px-4 py-3 border-b border-gray-100">
-        <View className="flex-row items-center bg-gray-100 rounded-full px-4 py-3">
-          <Feather name="search" size={20} color="#657786" />
+      <View className="px-4 py-2 bg-white">
+        <View className="flex-row items-center bg-gray-100 rounded-2xl px-4 py-2.5">
+          <Ionicons name="search" size={18} color="#9ca3af" />
           <TextInput
-            placeholder="Search for people and groups"
-            className="flex-1 ml-3 text-base"
-            placeholderTextColor="#657786"
+            placeholder="Tìm kiếm"
+            className="flex-1 ml-2 text-base text-gray-800"
+            placeholderTextColor="#9ca3af"
             value={searchText}
             onChangeText={setSearchText}
           />
+          {searchText.length > 0 && (
+            <TouchableOpacity onPress={() => setSearchText("")}>
+              <Ionicons name="close-circle" size={18} color="#9ca3af" />
+            </TouchableOpacity>
+          )}
         </View>
       </View>
 
@@ -375,7 +440,7 @@ const MessagesScreen = () => {
         <View className="border-b border-gray-100">
           <View className="px-4 py-2">
             <Text className="text-sm font-semibold text-gray-700">
-              Friends to Message
+              Bạn bè
             </Text>
           </View>
           <ScrollView
@@ -422,59 +487,71 @@ const MessagesScreen = () => {
         </View>
       )}
 
-      {/* CONVERSATIONS LIST (Hộp thư đến) */}
+      {/* CONVERSATIONS LIST */}
       {isLoadingConversations ? (
         <View className="flex-1 items-center justify-center">
-          <ActivityIndicator size="large" color="#1DA1F2" />
-          <Text className="text-gray-500 mt-2">Loading conversations...</Text>
+          <ActivityIndicator size="large" color="#0084ff" />
+          <Text className="text-gray-400 mt-3">Đang tải...</Text>
         </View>
       ) : filteredConversations.length === 0 ? (
-        <View className="flex-1 items-center justify-center">
-          <Text className="text-gray-500">No conversations yet</Text>
-          <Text className="text-gray-400 text-sm mt-2">
-            Start a conversation with someone in your friends list above
-          </Text>
+        <View className="flex-1 items-center justify-center p-8">
+          <View className="w-20 h-20 bg-blue-50 rounded-full items-center justify-center mb-4">
+            <Ionicons name="chatbubbles-outline" size={40} color="#0084ff" />
+          </View>
+          <Text className="text-gray-700 font-semibold text-lg mb-1">Chưa có đoạn chat</Text>
+          <Text className="text-gray-400 text-center">Bắt đầu cuộc trò chuyện mới với bạn bè</Text>
         </View>
       ) : (
         <ScrollView
           className="flex-1"
           showsVerticalScrollIndicator={false}
-          contentContainerStyle={{ paddingBottom: 100 + insets.bottom }}
+          contentContainerStyle={{ paddingTop: 8, paddingBottom: 100 + insets.bottom }}
         >
           {filteredConversations.map((conversation: Conversation) => (
             <TouchableOpacity
               key={conversation._id}
-              className="flex-row items-center p-4 border-b border-gray-50 active:bg-gray-50"
+              className="mx-3 mb-2 bg-white rounded-2xl p-3 flex-row items-center"
+              style={{
+                shadowColor: "#000",
+                shadowOffset: { width: 0, height: 1 },
+                shadowOpacity: 0.04,
+                shadowRadius: 6,
+                elevation: 1,
+              }}
               onPress={() => openConversation(conversation.user._id)}
+              activeOpacity={0.7}
             >
-              <Image
-                source={{
-                  uri:
-                    conversation.user.profilePicture ||
-                    "https://placehold.co/100x100?text=User",
-                }}
-                className="size-12 rounded-full mr-3"
-              />
+              <View className="relative">
+                <Image
+                  source={{
+                    uri:
+                      conversation.user.profilePicture ||
+                      "https://placehold.co/100x100?text=User",
+                  }}
+                  className="w-14 h-14 rounded-full"
+                />
+                <View className="absolute bottom-0 right-0 w-4 h-4 bg-green-400 rounded-full border-2 border-white" />
+              </View>
 
-              <View className="flex-1">
-                <View className="flex-row items-center justify-between mb-1">
-                  <Text className="font-semibold text-gray-900">
+              <View className="flex-1 ml-3">
+                <View className="flex-row items-center justify-between mb-0.5">
+                  <Text className="font-bold text-gray-900">
                     {conversation.user.firstName} {conversation.user.lastName}
                   </Text>
-                  <Text className="text-gray-500 text-sm">
+                  <Text className="text-gray-400 text-xs">
                     {formatDate(conversation.lastMessageAt)}
                   </Text>
                 </View>
                 <Text
-                  className={`text-sm text-gray-500 ${!conversation.isRead ? "font-bold text-gray-800" : ""}`}
+                  className={`text-sm ${!conversation.isRead ? "font-semibold text-gray-900" : "text-gray-500"}`}
                   numberOfLines={1}
                 >
-                  {conversation.lastMessage || "No messages yet"}
+                  {conversation.lastMessage || "Bắt đầu trò chuyện"}
                 </Text>
               </View>
-              {/* Dấu chấm đỏ chưa đọc */}
+              
               {!conversation.isRead && (
-                <View className="w-2 h-2 bg-red-500 rounded-full ml-2" />
+                <View className="ml-2 w-3 h-3 bg-blue-500 rounded-full" />
               )}
             </TouchableOpacity>
           ))}
@@ -489,27 +566,48 @@ const MessagesScreen = () => {
       >
         {isChatOpen && otherUser && (
           <SafeAreaView className="flex-1 bg-white">
-            {/* Chat Header */}
-            <View className="flex-row items-center px-4 py-3 border-b border-gray-100">
+            {/* Chat Header - Messenger Style */}
+            <View className="flex-row items-center px-4 py-3 bg-white" style={{
+              shadowColor: "#000",
+              shadowOffset: { width: 0, height: 1 },
+              shadowOpacity: 0.05,
+              shadowRadius: 8,
+              elevation: 2,
+            }}>
               <TouchableOpacity onPress={closeChatModal} className="mr-3">
-                <Feather name="arrow-left" size={24} color="#1DA1F2" />
+                <Feather name="arrow-left" size={24} color="#0084ff" />
               </TouchableOpacity>
-              <Image
-                source={{
-                  uri:
-                    otherUser.profilePicture ||
-                    "https://placehold.co/100x100?text=User",
-                }}
-                className="size-10 rounded-full mr-3"
-              />
-              <View className="flex-1">
-                <Text className="font-semibold text-gray-900">
+              
+              <View className="relative">
+                <Image
+                  source={{
+                    uri: otherUser.profilePicture || "https://placehold.co/100x100?text=User",
+                  }}
+                  className="w-11 h-11 rounded-full"
+                />
+                <View className="absolute bottom-0 right-0 w-3.5 h-3.5 bg-green-400 rounded-full border-2 border-white" />
+              </View>
+              
+              <View className="flex-1 ml-3">
+                <Text className="font-bold text-gray-900 text-base">
                   {otherUser.firstName} {otherUser.lastName}
                 </Text>
-                <Text className="text-gray-500 text-sm">
-                  @{otherUser.username}
-                </Text>
+                <Text className="text-green-500 text-xs font-medium">Đang hoạt động</Text>
               </View>
+              
+              {/* Call Buttons */}
+              <TouchableOpacity 
+                className="w-10 h-10 bg-blue-50 rounded-full items-center justify-center mr-2"
+                onPress={() => Alert.alert("Cuộc gọi", "Tính năng gọi điện đang phát triển")}
+              >
+                <Ionicons name="call" size={20} color="#0084ff" />
+              </TouchableOpacity>
+              <TouchableOpacity 
+                className="w-10 h-10 bg-blue-50 rounded-full items-center justify-center"
+                onPress={() => Alert.alert("Video call", "Tính năng gọi video đang phát triển")}
+              >
+                <Ionicons name="videocam" size={20} color="#0084ff" />
+              </TouchableOpacity>
             </View>
 
             {/* Chat Messages Area */}
@@ -517,7 +615,7 @@ const MessagesScreen = () => {
               // ... Loading
               <View className="flex-1 items-center justify-center">
                 <ActivityIndicator size="large" color="#1DA1F2" />
-                <Text className="text-gray-500 mt-2">Loading messages...</Text>
+                <Text className="text-gray-500 mt-2">Đang tải tin nhắn...</Text>
               </View>
             ) : messagesError ? (
               // ... Error (403 Forbidden - Not mutual follow)
@@ -525,17 +623,17 @@ const MessagesScreen = () => {
                 <Text className="text-red-500 text-center mb-4 font-semibold">
                   {/* Hiển thị lỗi từ Backend (ví dụ: "Two users must mutually follow each other") */}
                   {(messagesError as any)?.response?.data?.error ||
-                    "Failed to load messages."}
+                    "Không thể tải tin nhắn."}
                 </Text>
                 <Text className="text-gray-500 text-center mb-4">
-                  Nếu bạn vừa Follow, hãy đợi một chút và thử lại.
+                  Nếu bạn vừa theo dõi, hãy đợi một chút và thử lại.
                 </Text>
                 <TouchableOpacity
                   onPress={() => refetchMessages()}
                   className="bg-blue-500 px-4 py-2 rounded-lg"
                 >
                   <Text className="text-white font-semibold">
-                    Retry / Refresh
+                    Thử lại / Làm mới
                   </Text>
                 </TouchableOpacity>
               </View>
@@ -550,13 +648,19 @@ const MessagesScreen = () => {
                 <View className="mb-4">
                   {messages.length === 0 ? (
                     <Text className="text-center text-gray-400 text-sm mb-4">
-                      This is the beginning of your conversation with{" "}
+                      Đây là sự khởi đầu cuộc trò chuyện của bạn với{" "}
                       {otherUser.firstName} {otherUser.lastName}
                     </Text>
                   ) : (
                     messages.map((message: Message) => {
                       const isFromCurrentUser =
                         message.sender._id === currentUser?._id;
+                      
+                      // Decrypt message content
+                      // We can assume messages are encrypted if key features are active
+                      // The decrypt function handles plain text fallback automatically
+                      const decryptedContent = decryptMessage(message.content);
+
                       return (
                         <View
                           key={message._id}
@@ -592,16 +696,22 @@ const MessagesScreen = () => {
                                   {message.attachment.type.startsWith(
                                     "image"
                                   ) ? (
-                                    <Image
-                                      source={{ uri: message.attachment.url }}
-                                      className="w-full h-48 rounded-lg mb-2"
-                                      resizeMode="cover"
-                                    />
+                                    <TouchableOpacity
+                                      onPress={() =>
+                                        handleViewImage(message.attachment!.url)
+                                      }
+                                    >
+                                      <Image
+                                        source={{ uri: message.attachment!.url }}
+                                        className="w-full h-48 rounded-lg mb-2"
+                                        resizeMode="cover"
+                                      />
+                                    </TouchableOpacity>
                                   ) : (
                                     <TouchableOpacity
                                       className="flex-row items-center p-3 rounded-lg border-2 border-dashed border-gray-300"
                                       onPress={() =>
-                                        handleOpenFile(message.attachment!.url)
+                                        handleOpenDocument(message.attachment!.url)
                                       }
                                     >
                                       <Feather
@@ -626,17 +736,17 @@ const MessagesScreen = () => {
                                   )}
                                 </View>
                               )}
-                              {message.content && (
-                                <Text
-                                  className={
-                                    isFromCurrentUser
-                                      ? "text-white"
-                                      : "text-gray-900"
-                                  }
-                                >
-                                  {message.content}
-                                </Text>
-                              )}
+                              {message.content ? (
+                            <Text
+                              className={`${
+                                isFromCurrentUser
+                                  ? "text-white"
+                                  : "text-gray-900"
+                              } text-base`}
+                            >
+                              {decryptedContent}
+                            </Text>
+                          ) : null}
                             </View>
                             <Text className="text-xs text-gray-400 mt-1">
                               {formatDate(message.createdAt)}
@@ -686,56 +796,80 @@ const MessagesScreen = () => {
               </View>
             )}
 
-            {/* Message Input */}
-            <View className="flex-row items-center px-4 py-3 border-t border-gray-100">
-              <TouchableOpacity
-                onPress={pickImage}
-                className="mr-2 p-2"
-                disabled={sendMessageMutation.isPending}
-              >
-                <Feather name="image" size={24} color="#1DA1F2" />
-              </TouchableOpacity>
-              <TouchableOpacity
-                onPress={pickDocument}
-                className="mr-2 p-2"
-                disabled={sendMessageMutation.isPending}
-              >
-                <Feather name="paperclip" size={24} color="#1DA1F2" />
-              </TouchableOpacity>
-              <View className="flex-1 flex-row items-center bg-gray-100 rounded-full px-4 py-3 mr-3">
+            {/* Message Input - Messenger Style */}
+            <View className="flex-row items-end px-3 py-2 bg-white border-t border-gray-100">
+              {/* Quick action buttons */}
+              <View className="flex-row items-center pb-2">
+                <TouchableOpacity
+                  onPress={() => Alert.alert("Camera", "Mở camera...")}
+                  className="w-9 h-9 bg-blue-500 rounded-full items-center justify-center mr-1"
+                  disabled={sendMessageMutation.isPending}
+                >
+                  <Ionicons name="camera" size={18} color="white" />
+                </TouchableOpacity>
+                <TouchableOpacity
+                  onPress={pickImage}
+                  className="w-9 h-9 items-center justify-center mr-1"
+                  disabled={sendMessageMutation.isPending}
+                >
+                  <Ionicons name="image" size={24} color="#0084ff" />
+                </TouchableOpacity>
+                <TouchableOpacity
+                  onPress={pickDocument}
+                  className="w-9 h-9 items-center justify-center"
+                  disabled={sendMessageMutation.isPending}
+                >
+                  <Ionicons name="document-attach" size={22} color="#0084ff" />
+                </TouchableOpacity>
+              </View>
+
+              {/* Text Input with emoji */}
+              <View className="flex-1 flex-row items-end bg-gray-100 rounded-3xl px-3 py-2 mx-2">
                 <TextInput
-                  className="flex-1 text-base"
-                  placeholder="Start a message..."
-                  placeholderTextColor="#657786"
+                  className="flex-1 text-base max-h-24 py-1"
+                  placeholder="Aa"
+                  placeholderTextColor="#9ca3af"
                   value={newMessage}
                   onChangeText={setNewMessage}
                   multiline
                 />
+                <TouchableOpacity 
+                  className="ml-2 pb-1"
+                  onPress={() => Alert.alert("Emoji", "Emoji picker sẽ mở ra...")}
+                >
+                  <Ionicons name="happy-outline" size={24} color="#0084ff" />
+                </TouchableOpacity>
               </View>
-              <TouchableOpacity
-                onPress={sendMessage}
-                disabled={
-                  (!newMessage.trim() && !selectedFile) ||
-                  sendMessageMutation.isPending
-                }
-                className={`size-10 rounded-full items-center justify-center ${
-                  (newMessage.trim() || selectedFile) &&
-                  !sendMessageMutation.isPending
-                    ? "bg-blue-500"
-                    : "bg-gray-300"
-                }`}
-              >
-                {sendMessageMutation.isPending ? (
-                  <ActivityIndicator size="small" color="white" />
-                ) : (
-                  <Feather name="send" size={20} color="white" />
-                )}
-              </TouchableOpacity>
+
+              {/* Send or Like button */}
+              {(newMessage.trim() || selectedFile) ? (
+                <TouchableOpacity
+                  onPress={sendMessage}
+                  disabled={sendMessageMutation.isPending}
+                  className="w-10 h-10 bg-blue-500 rounded-full items-center justify-center mb-0.5"
+                >
+                  {sendMessageMutation.isPending ? (
+                    <ActivityIndicator size="small" color="white" />
+                  ) : (
+                    <Ionicons name="send" size={18} color="white" />
+                  )}
+                </TouchableOpacity>
+              ) : (
+                <TouchableOpacity 
+                  className="w-10 h-10 items-center justify-center mb-0.5"
+                  onPress={() => {
+                    setNewMessage("👍");
+                    setTimeout(() => sendMessage(), 100);
+                  }}
+                >
+                  <Ionicons name="thumbs-up" size={26} color="#0084ff" />
+                </TouchableOpacity>
+              )}
             </View>
             {!isConnected && (
               <View className="px-4 py-2 bg-yellow-50">
                 <Text className="text-yellow-800 text-xs text-center">
-                  Connection lost. Reconnecting...
+                  Mất kết nối. Đang kết nối lại...
                 </Text>
               </View>
             )}
@@ -759,7 +893,7 @@ const MessagesScreen = () => {
             >
               <Feather name="arrow-left" size={24} color="#1DA1F2" />
             </TouchableOpacity>
-            <Text className="text-xl font-bold text-gray-900">New Message</Text>
+            <Text className="text-xl font-bold text-gray-900">Tin nhắn mới</Text>
             <View style={{ width: 24 }} />
           </View>
 
@@ -768,7 +902,7 @@ const MessagesScreen = () => {
             <View className="flex-row items-center bg-gray-100 rounded-full px-4 py-3">
               <Feather name="search" size={20} color="#657786" />
               <TextInput
-                placeholder="Search friends..."
+                placeholder="Tìm bạn bè..."
                 className="flex-1 ml-3 text-base"
                 placeholderTextColor="#657786"
                 value={searchText}
@@ -781,13 +915,13 @@ const MessagesScreen = () => {
           {isLoadingMutualFollows ? (
             <View className="flex-1 items-center justify-center">
               <ActivityIndicator size="large" color="#1DA1F2" />
-              <Text className="text-gray-500 mt-2">Loading friends...</Text>
+              <Text className="text-gray-500 mt-2">Đang tải danh sách bạn bè...</Text>
             </View>
           ) : mutualFollows.length === 0 ? (
             <View className="flex-1 items-center justify-center">
-              <Text className="text-gray-500">No friends to message</Text>
+              <Text className="text-gray-500">Không có bạn bè để nhắn tin</Text>
               <Text className="text-gray-400 text-sm mt-2">
-                Follow users who follow you back to start messaging
+                Theo dõi người dùng khác để bắt đầu nhắn tin
               </Text>
             </View>
           ) : (
@@ -890,11 +1024,11 @@ const MessagesScreen = () => {
 
         return (
           <ImageViewing
-            images={imageUrls}
+            images={imageUrls as any}
             imageIndex={imageViewerIndex}
             visible={imageViewerVisible}
             onRequestClose={() => setImageViewerVisible(false)}
-            onLongPress={(image) => {
+            onLongPress={(image: any) => {
               // Long press to download image
               const imageUrl = image.uri;
               const fileName = `image_${Date.now()}.jpg`;

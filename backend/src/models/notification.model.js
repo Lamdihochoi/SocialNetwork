@@ -27,6 +27,10 @@ const notificationSchema = new mongoose.Schema(
       ref: "Comment",
       default: null,
     },
+    isRead: {
+      type: Boolean,
+      default: false,
+    },
   },
   { timestamps: true }
 );

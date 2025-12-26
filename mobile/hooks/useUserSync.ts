@@ -1,24 +1,20 @@
-import { useEffect } from "react";
-import { useMutation } from "@tanstack/react-query";
-import { useAuth } from "@clerk/clerk-expo";
-import { useApiClient, userApi } from "../utils/api";
+import { useEffect, useRef } from "react";
+import { useAuth, useUser } from "@clerk/clerk-expo";
 
+/**
+ * useUserSync - Đã được xử lý trong complete-profile.tsx
+ * 
+ * Hook này giờ chỉ để reset state khi đăng xuất
+ * Không tự động sync nữa để tránh duplicate calls
+ */
 export const useUserSync = () => {
   const { isSignedIn } = useAuth();
-  const api = useApiClient();
+  const hasSynced = useRef(false);
 
-  const syncUserMutation = useMutation({
-    mutationFn: () => userApi.syncUser(api),
-    onSuccess: (response: any) =>
-      console.log("User synced successfully:", response.data.user),
-    onError: (error) => console.error("User sync failed:", error),
-  });
-
-  // auto-sync user when signed in
+  // Reset khi đăng xuất
   useEffect(() => {
-    // if user is signed in and user is not synced yet, sync user
-    if (isSignedIn && !syncUserMutation.data) {
-      syncUserMutation.mutate();
+    if (!isSignedIn) {
+      hasSynced.current = false;
     }
   }, [isSignedIn]);
 

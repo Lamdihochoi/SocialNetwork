@@ -24,8 +24,20 @@ export const useNotifications = () => {
       queryClient.invalidateQueries({ queryKey: ["notifications"] }),
   });
 
+  const markAsReadMutation = useMutation({
+    mutationFn: (notificationId: string) =>
+      api.put(`/notifications/${notificationId}/read`),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["notifications"] });
+    },
+  });
+
   const deleteNotification = (notificationId: string) => {
     deleteNotificationMutation.mutate(notificationId);
+  };
+
+  const markAsRead = (notificationId: string) => {
+    markAsReadMutation.mutate(notificationId);
   };
 
   return {
@@ -35,6 +47,7 @@ export const useNotifications = () => {
     refetch,
     isRefetching,
     deleteNotification,
+    markAsRead,
     isDeletingNotification: deleteNotificationMutation.isPending,
   };
 };

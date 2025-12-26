@@ -3,6 +3,7 @@ import User from "../models/user.model.js";
 import Notification from "../models/notification.model.js";
 import { getAuth } from "@clerk/express";
 import { clerkClient } from "@clerk/express";
+import cloudinary from "../config/cloudinary.js";
 
 // ==============================
 // 🧩 Lấy thông tin profile user
@@ -41,46 +42,145 @@ export const getUserById = asyncHandler(async (req, res) => {
 });
 
 // ==============================
-// ✏️ Cập nhật hồ sơ user
+// ✏️ Cập nhật hồ sơ user (với hỗ trợ upload ảnh)
 // ==============================
 export const updateProfile = asyncHandler(async (req, res) => {
-  // Use req.user from middleware
-  const user = await User.findByIdAndUpdate(req.user._id, req.body, {
-    new: true,
-  });
+  try {
+    const updateData = { ...req.body };
 
-  if (!user) return res.status(404).json({ error: "User not found" });
+    // Handle profile picture upload
+    if (req.files?.profilePicture?.[0]) {
+      const profileFile = req.files.profilePicture[0];
+      const base64Image = `data:${profileFile.mimetype};base64,${profileFile.buffer.toString("base64")}`;
+      
+      const uploadResponse = await cloudinary.uploader.upload(base64Image, {
+        folder: "social_media_profiles",
+        resource_type: "image",
+        transformation: [
+          { width: 400, height: 400, crop: "fill", gravity: "face" },
+          { quality: "auto" },
+          { format: "auto" },
+        ],
+      });
+      updateData.profilePicture = uploadResponse.secure_url;
+    }
 
-  res.status(200).json({ user });
+    // Handle banner image upload
+    if (req.files?.bannerImage?.[0]) {
+      const bannerFile = req.files.bannerImage[0];
+      const base64Image = `data:${bannerFile.mimetype};base64,${bannerFile.buffer.toString("base64")}`;
+      
+      const uploadResponse = await cloudinary.uploader.upload(base64Image, {
+        folder: "social_media_banners",
+        resource_type: "image",
+        transformation: [
+          { width: 1200, height: 400, crop: "fill" },
+          { quality: "auto" },
+          { format: "auto" },
+        ],
+      });
+      updateData.bannerImage = uploadResponse.secure_url;
+    }
+
+    // Update user in database
+    const user = await User.findByIdAndUpdate(req.user._id, updateData, {
+      new: true,
+    });
+
+    if (!user) return res.status(404).json({ error: "User not found" });
+
+    console.log("[updateProfile] Success:", user.username);
+    res.status(200).json({ user });
+  } catch (error) {
+    console.error("[updateProfile] Error:", error);
+    res.status(500).json({ error: "Failed to update profile" });
+  }
 });
 
 // ==============================
 // 🔄 Đồng bộ user từ Clerk
 // ==============================
+
+// Helper: Loại bỏ dấu tiếng Việt và ký tự đặc biệt
+const normalizeUsername = (str) => {
+  return str
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "") // Bỏ dấu
+    .replace(/đ/g, "d")
+    .replace(/Đ/g, "D")
+    .replace(/[^a-z0-9]/g, ""); // Chỉ giữ chữ và số
+};
+
 export const syncUser = asyncHandler(async (req, res) => {
-  const { userId } = getAuth(req);
+  try {
+    const auth = getAuth(req);
+    const { userId } = auth;
 
-  const existingUser = await User.findOne({ clerkId: userId });
-  if (existingUser) {
-    return res
-      .status(200)
-      .json({ user: existingUser, message: "User already exists" });
+    console.log("[syncUser] userId:", userId);
+
+    if (!userId) {
+      console.log("[syncUser] ERROR: No userId in auth object");
+      return res.status(401).json({ message: "Unauthorized: No userId found" });
+    }
+
+    const existingUser = await User.findOne({ clerkId: userId });
+    if (existingUser) {
+      // User already exists
+      return res
+        .status(200)
+        .json({ user: existingUser, message: "User already exists" });
+    }
+
+    const clerkUser = await clerkClient.users.getUser(userId);
+
+    const email = clerkUser.emailAddresses[0]?.emailAddress;
+    if (!email) {
+      console.error("DEBUG: No email found for user");
+      return res.status(400).json({ message: "No email found" });
+    }
+
+    // 1. Validate Body
+    const bodyArgs = req.body || {};
+    
+    // 2. Fallback logic: Body -> Clerk Object -> Empty
+    const firstName = bodyArgs.firstName || clerkUser.firstName || "";
+    const lastName = bodyArgs.lastName || clerkUser.lastName || "";
+
+    // 3. Tạo username từ firstName + lastName (loại bỏ dấu và ký tự đặc biệt)
+    let baseUsername = normalizeUsername(firstName + lastName);
+    
+    // Fallback nếu tên rỗng
+    if (!baseUsername) {
+      baseUsername = email.split("@")[0].replace(/[^a-z0-9]/g, "");
+    }
+
+    // 4. Đảm bảo username unique bằng cách thêm số random nếu cần
+    let username = baseUsername;
+    let counter = 1;
+    while (await User.findOne({ username })) {
+      username = `${baseUsername}${counter}`;
+      counter++;
+    }
+
+    const userData = {
+      clerkId: userId,
+      email: email,
+      firstName: firstName,
+      lastName: lastName,
+      username: username, // Ví dụ: "nguyenvana" thay vì "email123"
+      profilePicture: clerkUser.imageUrl || "",
+    };
+
+    const user = await User.create(userData);
+    console.log("[syncUser] Created user with username:", username);
+    res.status(201).json({ user, message: "User created successfully" });
+  } catch (error) {
+    console.error("Sync user error:", error);
+    res.status(500).json({ message: "Sync failed", error: error.message });
   }
-
-  const clerkUser = await clerkClient.users.getUser(userId);
-
-  const userData = {
-    clerkId: userId,
-    email: clerkUser.emailAddresses[0].emailAddress,
-    firstName: clerkUser.firstName || "",
-    lastName: clerkUser.lastName || "",
-    username: clerkUser.emailAddresses[0].emailAddress.split("@")[0],
-    profilePicture: clerkUser.imageUrl || "",
-  };
-
-  const user = await User.create(userData);
-  res.status(201).json({ user, message: "User created successfully" });
 });
+
 
 // ==============================
 // 👤 Lấy thông tin user hiện tại
@@ -253,4 +353,80 @@ export const getMutualFollows = asyncHandler(async (req, res) => {
 
   // Return as "friends" to match frontend expectation
   res.status(200).json({ friends });
+});
+
+// ==============================
+// 🚫 Block a user
+// ==============================
+export const blockUser = asyncHandler(async (req, res) => {
+  const currentUser = req.user;
+  const { id: targetUserId } = req.params;
+
+  if (currentUser._id.toString() === targetUserId) {
+    return res.status(400).json({ error: "Không thể tự chặn chính mình" });
+  }
+
+  const targetUser = await User.findById(targetUserId);
+  if (!targetUser) {
+    return res.status(404).json({ error: "Người dùng không tồn tại" });
+  }
+
+  // Check if already blocked
+  const isBlocked = currentUser.blockedUsers?.includes(targetUserId);
+
+  if (isBlocked) {
+    // Unblock
+    await User.findByIdAndUpdate(currentUser._id, {
+      $pull: { blockedUsers: targetUserId },
+    });
+    
+    res.status(200).json({ 
+      message: "Đã bỏ chặn người dùng",
+      isBlocked: false 
+    });
+  } else {
+    // Block - also unfollow each other
+    await User.findByIdAndUpdate(currentUser._id, {
+      $addToSet: { blockedUsers: targetUserId },
+      $pull: { following: targetUserId, followers: targetUserId },
+    });
+    
+    await User.findByIdAndUpdate(targetUserId, {
+      $pull: { following: currentUser._id, followers: currentUser._id },
+    });
+    
+    res.status(200).json({ 
+      message: "Đã chặn người dùng",
+      isBlocked: true 
+    });
+  }
+});
+
+// ==============================
+// 📋 Get blocked users list
+// ==============================
+export const getBlockedUsers = asyncHandler(async (req, res) => {
+  const currentUser = await User.findById(req.user._id)
+    .populate("blockedUsers", "username firstName lastName profilePicture");
+
+  res.status(200).json({ 
+    blockedUsers: currentUser?.blockedUsers || [] 
+  });
+});
+
+// ==============================
+// 🔔 Register push notification token
+// ==============================
+export const registerPushToken = asyncHandler(async (req, res) => {
+  const { expoPushToken } = req.body;
+  
+  if (!expoPushToken) {
+    return res.status(400).json({ error: "Push token is required" });
+  }
+
+  await User.findByIdAndUpdate(req.user._id, { expoPushToken });
+
+  res.status(200).json({ 
+    message: "Push token registered successfully" 
+  });
 });

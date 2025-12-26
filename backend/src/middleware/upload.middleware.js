@@ -51,4 +51,14 @@ export const uploadMessage = multer({
   limits: { fileSize: 10 * 1024 * 1024 }, // 10MB limit for messages
 });
 
+// Upload middleware for profile updates (profile picture + banner image)
+export const uploadProfile = multer({
+  storage: storage,
+  fileFilter: fileFilter,
+  limits: { fileSize: 5 * 1024 * 1024 }, // 5MB limit
+}).fields([
+  { name: "profilePicture", maxCount: 1 },
+  { name: "bannerImage", maxCount: 1 },
+]);
+
 export default upload;

@@ -14,11 +14,11 @@ const userSchema = new mongoose.Schema(
     },
     firstName: {
       type: String,
-      required: true,
+      default: "",
     },
     lastName: {
       type: String,
-      required: true,
+      default: "",
     },
     username: {
       type: String,
@@ -54,9 +54,23 @@ const userSchema = new mongoose.Schema(
         ref: "User",
       },
     ],
+    blockedUsers: [
+      {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: "User",
+      },
+    ],
+    expoPushToken: {
+      type: String,
+      default: "",
+    },
   },
   { timestamps: true }
 );
+
+// ⚡ PERFORMANCE INDEXES - Only add indexes NOT covered by unique:true
+// clerkId, email, username already have indexes from unique: true
+userSchema.index({ createdAt: -1 }); // For sorting by newest
 
 const User = mongoose.model("User", userSchema);
 

@@ -204,6 +204,10 @@ export const getMessageHistory = asyncHandler(async (req, res) => {
 // 📤 Send a message
 // ==============================
 export const sendMessage = asyncHandler(async (req, res) => {
+  console.log("DEBUG: sendMessage called --------------------------------");
+  console.log("DEBUG: Body:", req.body);
+  console.log("DEBUG: File:", req.file ? { name: req.file.originalname, type: req.file.mimetype, size: req.file.size } : "None");
+  console.log("DEBUG: User:", req.user?._id);
   const currentUser = req.user;
   const { receiverId, content } = req.body;
   const file = req.file; // File from multer
@@ -250,6 +254,7 @@ export const sendMessage = asyncHandler(async (req, res) => {
   let messageContent = content?.trim() || "";
 
   if (file) {
+    console.log("DEBUG: Entering file processing logic");
     try {
       // Determine file type
       const isImage = file.mimetype.startsWith("image/");
@@ -305,7 +310,7 @@ export const sendMessage = asyncHandler(async (req, res) => {
           : "📝 Document";
       }
     } catch (uploadError) {
-      console.error("Cloudinary upload error:", uploadError);
+      console.error("DEBUG: Cloudinary upload error FATAL:", uploadError);
       return res.status(400).json({ error: "Failed to upload file" });
     }
   }
@@ -353,5 +358,52 @@ export const sendMessage = asyncHandler(async (req, res) => {
     console.warn("Socket.io not found in request!");
   }
 
+  console.log("DEBUG: sendMessage success, responding 201");
   res.status(201).json({ message });
+});
+
+// ==============================
+// ✅ Mark messages as read
+// ==============================
+export const markMessagesAsRead = asyncHandler(async (req, res) => {
+  const currentUser = req.user;
+  const { conversationId } = req.params;
+
+  // Find conversation
+  const conversation = await Conversation.findById(conversationId);
+  if (!conversation) {
+    return res.status(404).json({ error: "Conversation not found" });
+  }
+
+  // Check if user is participant
+  const isParticipant = conversation.participants.some(
+    (p) => p.toString() === currentUser._id.toString()
+  );
+  if (!isParticipant) {
+    return res.status(403).json({ error: "Not authorized" });
+  }
+
+  // Mark all messages from other user as read
+  const result = await Message.updateMany(
+    {
+      conversation: conversationId,
+      sender: { $ne: currentUser._id },
+      isRead: false,
+    },
+    { $set: { isRead: true } }
+  );
+
+  // Emit socket event to notify sender that messages were read
+  if (req.io && result.modifiedCount > 0) {
+    req.io.to(conversationId).emit("messages_read", {
+      conversationId,
+      readBy: currentUser._id,
+      readAt: new Date(),
+    });
+  }
+
+  res.status(200).json({ 
+    message: "Messages marked as read",
+    modifiedCount: result.modifiedCount 
+  });
 });

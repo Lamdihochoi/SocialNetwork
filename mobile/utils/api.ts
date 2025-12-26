@@ -2,10 +2,10 @@ import axios, { AxiosInstance } from "axios";
 import { useAuth } from "@clerk/clerk-expo";
 
 // ⚠️ LƯU Ý: Nếu đổi mạng wifi, nhớ đổi lại IP này nhé
-const API_BASE_URL = "http://192.168.68.108:5001/api";
+const API_BASE_URL = "http://192.168.68.129:5001/api";
 
 export const createApiClient = (
-  getToken: () => Promise<string | null>
+  getToken: (options?: { skipCache?: boolean }) => Promise<string | null>
 ): AxiosInstance => {
   const api = axios.create({
     baseURL: API_BASE_URL,
@@ -16,9 +16,14 @@ export const createApiClient = (
   });
 
   api.interceptors.request.use(async (config) => {
-    const token = await getToken();
-    if (token) {
-      config.headers.Authorization = `Bearer ${token}`;
+    try {
+      // Force fresh token retrieval to avoid expired token issues
+      const token = await getToken({ skipCache: true });
+      if (token) {
+        config.headers.Authorization = `Bearer ${token}`;
+      }
+    } catch (error) {
+      console.error("[API] Error getting token:", error);
     }
     return config;
   });
@@ -67,6 +72,11 @@ export const userApi = {
 
   // Get mutual follows (friends)
   getMutualFollows: (api: AxiosInstance) => api.get("/users/mutual-follows"),
+
+  // 🚫 Block / Unblock user
+  blockUser: (api: AxiosInstance, userId: string) =>
+    api.post(`/users/${userId}/block`),
+  getBlockedUsers: (api: AxiosInstance) => api.get("/users/blocked"),
 };
 
 export const postApi = {
@@ -86,6 +96,8 @@ export const postApi = {
 };
 
 export const commentApi = {
+  getComments: (api: AxiosInstance, postId: string) =>
+    api.get(`/comments/post/${postId}`),
   createComment: (api: AxiosInstance, postId: string, content: string) =>
     api.post(`/comments/post/${postId}`, { content }),
 };
@@ -95,6 +107,15 @@ export const notificationApi = {
   getNotifications: (api: AxiosInstance) => api.get("/notifications"),
   markAsRead: (api: AxiosInstance, notificationId: string) =>
     api.put(`/notifications/${notificationId}/read`),
+};
+
+// 🟢 MỚI: API Bookmark
+export const bookmarkApi = {
+  getBookmarks: (api: AxiosInstance) => api.get("/bookmarks"),
+  toggleBookmark: (api: AxiosInstance, postId: string) =>
+    api.post(`/bookmarks/${postId}`),
+  checkBookmark: (api: AxiosInstance, postId: string) =>
+    api.get(`/bookmarks/${postId}/check`),
 };
 
 // 🟢 CẬP NHẬT: API Nhắn tin (Khớp với backend mới)
@@ -128,4 +149,8 @@ export const messageApi = {
       headers: { "Content-Type": "multipart/form-data" },
     });
   },
+
+  // Mark messages as read
+  markAsRead: (api: AxiosInstance, conversationId: string) =>
+    api.put(`/messages/${conversationId}/read`),
 };

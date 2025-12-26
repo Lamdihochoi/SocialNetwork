@@ -1,4 +1,8 @@
-import { useSocialAuth } from "@/hooks/useSocialAuth";
+import { useOAuth } from "@clerk/clerk-expo";
+import * as WebBrowser from "expo-web-browser";
+import * as Linking from "expo-linking";
+import { useCallback, useEffect, useState } from "react";
+import { Link } from "expo-router";
 import {
   ActivityIndicator,
   Image,
@@ -7,8 +11,59 @@ import {
   View,
 } from "react-native";
 
+// Warm up the browser to improve UX
+export const useWarmUpBrowser = () => {
+  useEffect(() => {
+    void WebBrowser.warmUpAsync();
+    return () => {
+      void WebBrowser.coolDownAsync();
+    };
+  }, []);
+};
+
+WebBrowser.maybeCompleteAuthSession();
+
 export default function Index() {
-  const { handleSocialAuth, isLoading } = useSocialAuth();
+  useWarmUpBrowser();
+  const [isLoading, setIsLoading] = useState(false);
+
+  const { startOAuthFlow: startGoogleOAuth } = useOAuth({ strategy: "oauth_google" });
+  const { startOAuthFlow: startAppleOAuth } = useOAuth({ strategy: "oauth_apple" });
+
+  const onGoogleSignInPress = useCallback(async () => {
+    try {
+      setIsLoading(true);
+      const { createdSessionId, setActive } = await startGoogleOAuth({
+        redirectUrl: Linking.createURL("/(auth)/complete-profile", { scheme: "mobile" }),
+      });
+
+      if (createdSessionId && setActive) {
+        // No biometric here - let _layout.tsx handle the flow
+        await setActive({ session: createdSessionId });
+      }
+    } catch (err) {
+      console.error("OAuth error", err);
+    } finally {
+      setIsLoading(false);
+    }
+  }, [startGoogleOAuth]);
+
+  const onAppleSignInPress = useCallback(async () => {
+    try {
+      setIsLoading(true);
+      const { createdSessionId, setActive } = await startAppleOAuth({
+        redirectUrl: Linking.createURL("/(auth)/complete-profile", { scheme: "mobile" }),
+      });
+
+      if (createdSessionId && setActive) {
+        await setActive({ session: createdSessionId });
+      }
+    } catch (err) {
+      console.error("OAuth error", err);
+    } finally {
+      setIsLoading(false);
+    }
+  }, [startAppleOAuth]);
 
   return (
     <View className="flex-1 bg-white">
@@ -27,7 +82,7 @@ export default function Index() {
             {/* GOOGLE SIGNIN BTN */}
             <TouchableOpacity
               className="flex-row items-center justify-center bg-white border border-gray-300 rounded-full py-3 px-6"
-              onPress={() => handleSocialAuth("oauth_google")}
+              onPress={onGoogleSignInPress}
               disabled={isLoading}
               style={{
                 shadowColor: "#000",
@@ -56,7 +111,7 @@ export default function Index() {
             {/* APPLE SIGNIN ICON */}
             <TouchableOpacity
               className="flex-row items-center justify-center bg-white border border-gray-300 rounded-full py-3 px-6"
-              onPress={() => handleSocialAuth("oauth_apple")}
+              onPress={onAppleSignInPress}
               disabled={isLoading}
               style={{
                 shadowColor: "#000",
@@ -81,6 +136,35 @@ export default function Index() {
                 </View>
               )}
             </TouchableOpacity>
+          </View>
+
+          {/* EMAIL LOGIN BTN */}
+          <Link href={"/(auth)/login" as any} asChild>
+            <TouchableOpacity
+              className="flex-row items-center justify-center bg-black border border-gray-300 rounded-full py-3 px-6 mt-2"
+              style={{
+                shadowColor: "#000",
+                shadowOffset: { width: 0, height: 1 },
+                shadowOpacity: 0.1,
+                shadowRadius: 2,
+                elevation: 2,
+              }}
+            >
+              <View className="flex-row items-center justify-center">
+                <Text className="text-white font-medium text-base">
+                  Continue with Email
+                </Text>
+              </View>
+            </TouchableOpacity>
+          </Link>
+
+          <View className="flex-row justify-center mt-6">
+            <Text className="text-gray-500">Don't have an account? </Text>
+            <Link href={"/(auth)/register" as any} asChild>
+              <TouchableOpacity>
+                <Text className="text-blue-500 font-medium">Sign Up</Text>
+              </TouchableOpacity>
+            </Link>
           </View>
 
           {/* Terms and Privacy */}

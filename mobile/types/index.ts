@@ -9,6 +9,9 @@ export interface User {
   clerkId?: string;
   followers?: any[]; // Để any[] để tránh lỗi type khi populate (lúc là string ID, lúc là Object)
   following?: any[];
+  isFollowing?: boolean;
+  followersCount?: number;
+  followingCount?: number;
 }
 
 // 2. Định nghĩa Comment

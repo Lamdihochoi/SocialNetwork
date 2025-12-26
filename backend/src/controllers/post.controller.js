@@ -8,21 +8,19 @@ import Comment from "../models/comment.model.js";
 
 export const getPosts = async (req, res) => {
   try {
+    // ✅ Tối ưu: lean() để trả về plain object, limit để không load quá nhiều
     const posts = await Post.find()
       .populate("user", "username firstName lastName profilePicture followers")
-      .populate({
-        path: "comments",
-        populate: { path: "user", select: "username profilePicture" },
-      })
-      .sort({ createdAt: -1 });
+      .sort({ createdAt: -1 })
+      .limit(50) // Chỉ load 50 bài viết mới nhất
+      .lean(); // Trả về plain object, nhanh hơn 3-5x
 
-    // ✅ Thêm trường isFollowing
+    // ✅ Thêm trường isFollowing (không cần toObject vì đã dùng lean)
     const userId = req.user?._id?.toString();
     const formatted = posts.map((post) => {
-      const postObj = post.toObject();
-      const followers = postObj.user.followers || [];
-      postObj.isFollowing = followers.some((f) => f.toString() === userId);
-      return postObj;
+      const followers = post.user?.followers || [];
+      post.isFollowing = followers.some((f) => f.toString() === userId);
+      return post;
     });
 
     res.status(200).json(formatted);
@@ -53,25 +51,21 @@ export const getUserPosts = async (req, res) => {
   try {
     const { username } = req.params;
 
-    const user = await User.findOne({ username });
+    const user = await User.findOne({ username }).lean();
     if (!user) return res.status(404).json({ error: "User not found" });
 
+    // ✅ Tối ưu với lean() và limit
     const posts = await Post.find({ user: user._id })
       .populate("user", "username firstName lastName profilePicture followers")
-      .populate({
-        path: "comments",
-        populate: { path: "user", select: "username profilePicture" },
-      })
-      .sort({ createdAt: -1 });
+      .sort({ createdAt: -1 })
+      .limit(30)
+      .lean();
 
     const currentUserId = req.user?._id?.toString();
     const formatted = posts.map((post) => {
-      const postObj = post.toObject();
-      const followers = postObj.user.followers || [];
-      postObj.isFollowing = followers.some(
-        (f) => f.toString() === currentUserId
-      );
-      return postObj;
+      const followers = post.user?.followers || [];
+      post.isFollowing = followers.some((f) => f.toString() === currentUserId);
+      return post;
     });
 
     res.status(200).json(formatted);
@@ -196,6 +190,11 @@ export const deletePost = asyncHandler(async (req, res) => {
 // ==============================
 // 🔍 Universal Search (Posts & Users)
 // ==============================
+// Helper to escape regex special characters
+function escapeRegex(text) {
+  return text.replace(/[-[\]{}()*+?.,\\^$|#\s]/g, "\\$&");
+}
+
 export const searchPosts = asyncHandler(async (req, res) => {
   const { q } = req.query;
 
@@ -206,7 +205,8 @@ export const searchPosts = asyncHandler(async (req, res) => {
   try {
     const query = q.trim();
     const isUserSearch = query.startsWith("@");
-    const searchTerm = isUserSearch ? query.substring(1) : query;
+    const rawSearchTerm = isUserSearch ? query.substring(1) : query;
+    const searchTerm = escapeRegex(rawSearchTerm);
 
     if (isUserSearch && searchTerm.length > 0) {
       // Search for Users by username, firstName, or lastName

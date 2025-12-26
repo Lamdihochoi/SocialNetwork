@@ -15,6 +15,11 @@ export const usePosts = (username?: string) => {
     queryFn: () =>
       username ? postApi.getUserPosts(api, username) : postApi.getPosts(api),
     select: (response) => response.data,
+
+    // ✅ Tối ưu caching để load nhanh hơn
+    staleTime: 1000 * 60 * 2, // 2 phút - posts cần fresh hơn user data
+    gcTime: 1000 * 60 * 15, // 15 phút
+    refetchOnWindowFocus: false,
   });
 
   const likePostMutation = useMutation({

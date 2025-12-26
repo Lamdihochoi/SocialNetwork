@@ -6,11 +6,13 @@ import { View, Text, Alert, Image, TouchableOpacity } from "react-native";
 interface NotificationCardProps {
   notification: Notification;
   onDelete: (notificationId: string) => void;
+  onPress: (notification: Notification) => void;
 }
 
 const NotificationCard = ({
   notification,
   onDelete,
+  onPress,
 }: NotificationCardProps) => {
   const getNotificationText = () => {
     const name = `${notification.from.firstName} ${notification.from.lastName}`;
@@ -55,7 +57,11 @@ const NotificationCard = ({
   };
 
   return (
-    <View className="border-b border-gray-100 bg-white">
+    <TouchableOpacity 
+      activeOpacity={0.7}
+      onPress={() => onPress(notification)}
+      className={`border-b border-gray-100 ${!notification.isRead ? "bg-blue-50" : "bg-white"}`}
+    >
       <View className="flex-row p-4">
         <View className="relative mr-3">
           <Image
@@ -63,7 +69,7 @@ const NotificationCard = ({
             className="size-12 rounded-full"
           />
 
-          <View className="abolute -bottom-1 -right-1 size-6 bg-white items-center justify-center">
+          <View className="absolute -bottom-1 -right-1 size-6 bg-white rounded-full items-center justify-center shadow-sm">
             {getNotificationIcon()}
           </View>
         </View>
@@ -72,7 +78,7 @@ const NotificationCard = ({
           <View className="flex-row items-start justify-between mb-1">
             <View className="flex-1">
               <Text className="text-gray-900 text-base leading-5 mb-1">
-                <Text className="font-semibold">
+                <Text className="font-bold">
                   {notification.from.firstName} {notification.from.lastName}
                 </Text>
                 <Text className="text-gray-500">
@@ -80,7 +86,7 @@ const NotificationCard = ({
                   @{notification.from.username}
                 </Text>
               </Text>
-              <Text className="text-gray-700 text-sm mb-2">
+              <Text className={`text-gray-700 text-sm mb-2 ${!notification.isRead ? "font-semibold" : ""}`}>
                 {getNotificationText()}
               </Text>
             </View>
@@ -91,7 +97,7 @@ const NotificationCard = ({
           </View>
 
           {notification.post && (
-            <View className="bg-gray-50 rounded-lg p-3 mb-2">
+            <View className="bg-white/50 rounded-lg p-3 mb-2 border border-gray-100">
               <Text className="text-gray-700 text-sm mb-1" numberOfLines={3}>
                 {notification.post.content}
               </Text>
@@ -106,7 +112,7 @@ const NotificationCard = ({
           )}
 
           {notification.comment && (
-            <View className="bg-blue-50 rounded-lg p-3 mb-2">
+            <View className="bg-blue-50/50 rounded-lg p-3 mb-2 border border-blue-100">
               <Text className="text-gray-600 text-xs mb-1">Comment:</Text>
               <Text className="text-gray-700 text-sm" numberOfLines={2}>
                 &ldquo;{notification.comment.content}&rdquo;
@@ -114,12 +120,17 @@ const NotificationCard = ({
             </View>
           )}
 
-          <Text className="text-gray-400 text-xs">
-            {formatDate(notification.createdAt)}
-          </Text>
+          <View className="flex-row items-center">
+             <Text className="text-gray-400 text-xs mr-2">
+              {formatDate(notification.createdAt)}
+            </Text>
+            {!notification.isRead && (
+              <View className="w-2 h-2 bg-blue-500 rounded-full" />
+            )}
+          </View>
         </View>
       </View>
-    </View>
+    </TouchableOpacity>
   );
 };
 export default NotificationCard;

@@ -20,12 +20,14 @@ export const useComments = () => {
       const response = await commentApi.createComment(api, postId, content);
       return response.data;
     },
-    onSuccess: () => {
+    onSuccess: (data, variables) => {
       setCommentText("");
+      // ✅ Invalidate comments để CommentsModal cập nhật ngay
+      queryClient.invalidateQueries({ queryKey: ["comments", variables.postId] });
       queryClient.invalidateQueries({ queryKey: ["posts"] });
     },
     onError: () => {
-      Alert.alert("Error", "Failed to post comment. Try again.");
+      Alert.alert("Lỗi", "Không thể đăng bình luận. Thử lại.");
     },
   });
 

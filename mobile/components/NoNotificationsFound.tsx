@@ -10,10 +10,10 @@ const NoNotificationsFound = () => {
       <View className="items-center">
         <Feather name="bell" size={80} color="#E1E8ED" />
         <Text className="text-2xl font-semibold text-gray-500 mt-6 mb-3">
-          No notifications yet
+          Chưa có thông báo nào
         </Text>
         <Text className="text-gray-400 text-center text-base leading-6 max-w-xs">
-          When people like, comment, or follow you, you&apos;ll see it here.
+          Khi mọi người thích, bình luận hoặc theo dõi bạn, bạn sẽ thấy ở đây.
         </Text>
       </View>
     </View>

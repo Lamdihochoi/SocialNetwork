@@ -4,6 +4,7 @@ import {
   getMessageHistory,
   sendMessage,
   getFriends,
+  markMessagesAsRead,
 } from "../controllers/message.controller.js";
 import { protectRoute } from "../middleware/auth.middleware.js";
 import { uploadMessage } from "../middleware/upload.middleware.js";
@@ -15,6 +16,8 @@ router.get("/friends", protectRoute, getFriends);
 router.get("/conversations", protectRoute, getConversations);
 router.get("/:otherUserId", protectRoute, getMessageHistory);
 router.post("/send", protectRoute, uploadMessage.single("file"), sendMessage);
+router.put("/:conversationId/read", protectRoute, markMessagesAsRead);
 
 export default router;
+
 

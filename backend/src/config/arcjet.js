@@ -11,6 +11,8 @@ import { ENV } from "./env.js";
 export const aj = arcjet({
   key: ENV.ARCJET_KEY,
   characteristics: ["ip.src"],
+  timeout: 5000, 
+
 
   rules: [
     // Bảo vệ khỏi tấn công phổ biến

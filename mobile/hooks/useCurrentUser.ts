@@ -15,6 +15,12 @@ export const useCurrentUser = () => {
     queryKey: ["authUser"],
     queryFn: () => userApi.getCurrentUser(api),
 
+    // ✅ Tối ưu caching để load nhanh hơn
+    staleTime: 1000 * 60 * 5, // 5 phút - không refetch nếu data còn fresh
+    gcTime: 1000 * 60 * 30, // 30 phút - giữ cache trong memory
+    refetchOnWindowFocus: false, // Không refetch khi focus app
+    refetchOnMount: false, // Không refetch khi component mount lại
+
     // ✅ Bổ sung: gộp cả followersCount và followingCount vào object user
     select: (response) => ({
       ...response.data.user,

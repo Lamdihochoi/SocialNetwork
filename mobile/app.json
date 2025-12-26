@@ -40,7 +40,21 @@
         }
       ],
       "expo-secure-store",
-      "expo-web-browser"
+      "expo-web-browser",
+      [
+        "expo-media-library",
+        {
+          "photosPermission": "Cho phép ứng dụng lưu ảnh vào thư viện.",
+          "savePhotosPermission": "Cho phép ứng dụng lưu ảnh vào thư viện.",
+          "isAccessMediaLocationEnabled": true
+        }
+      ],
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "Cho phép ứng dụng truy cập thư viện ảnh."
+        }
+      ]
     ],
     "experiments": {
       "typedRoutes": true,
