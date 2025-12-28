@@ -35,6 +35,10 @@ const notificationSchema = new mongoose.Schema(
   { timestamps: true }
 );
 
+// ⚡ PERFORMANCE INDEXES - Fetch và count notifications nhanh hơn
+notificationSchema.index({ to: 1, createdAt: -1 }); // Sort theo thời gian
+notificationSchema.index({ to: 1, isRead: 1 });     // Count unread nhanh
+
 const Notification = mongoose.model("Notification", notificationSchema);
 
 export default Notification;

@@ -30,12 +30,12 @@ export const aj = arcjet({
       ],
     }),
 
-    // Rate limiting (Token Bucket)
+    // Rate limiting (Token Bucket) - ⚡ INCREASED for faster app
     tokenBucket({
       mode: "LIVE",
-      refillRate: 10, // 10 tokens mỗi 10 giây
+      refillRate: 50, // 50 tokens mỗi 10 giây
       interval: 10,
-      capacity: 15, // tối đa 15 request burst
+      capacity: 100, // tối đa 100 request burst
     }),
   ],
 });

@@ -1,16 +1,18 @@
 import { useEffect, useRef, useState } from "react";
-import { Platform, Alert } from "react-native";
+import { Platform } from "react-native";
 import * as Device from "expo-device";
 import * as Notifications from "expo-notifications";
 import Constants from "expo-constants";
-import { useApiClient, userApi } from "@/utils/api";
+import { useApiClient } from "@/utils/api";
 
 // Configure notification behavior
 Notifications.setNotificationHandler({
-  handleNotification: async () => ({
+  handleNotification: async (_notification: Notifications.Notification) => ({
     shouldShowAlert: true,
     shouldPlaySound: true,
     shouldSetBadge: true,
+    shouldShowBanner: true,
+    shouldShowList: true,
   }),
 });
 
@@ -18,8 +20,23 @@ export const usePushNotifications = () => {
   const api = useApiClient();
   const [expoPushToken, setExpoPushToken] = useState<string>("");
   const [notification, setNotification] = useState<Notifications.Notification | null>(null);
-  const notificationListener = useRef<Notifications.Subscription>();
-  const responseListener = useRef<Notifications.Subscription>();
+  const notificationListener = useRef<Notifications.Subscription | undefined>(undefined);
+  const responseListener = useRef<Notifications.Subscription | undefined>(undefined);
+
+  const registerTokenWithBackend = async (token: string) => {
+    try {
+      await api.post("/users/push-token", { expoPushToken: token });
+      console.log("[PUSH] Token registered with backend");
+    } catch (error) {
+      console.error("[PUSH] Failed to register token:", error);
+    }
+  };
+
+  const handleNotificationTap = (data: Record<string, unknown>) => {
+    // Handle navigation based on notification type
+    console.log("[PUSH] Notification tapped with data:", data);
+    // You can use router.push() here to navigate to specific screens
+  };
 
   useEffect(() => {
     registerForPushNotificationsAsync().then((token) => {
@@ -32,8 +49,8 @@ export const usePushNotifications = () => {
 
     // Listen for incoming notifications
     notificationListener.current = Notifications.addNotificationReceivedListener(
-      (notification) => {
-        setNotification(notification);
+      (notif: Notifications.Notification) => {
+        setNotification(notif);
       }
     );
 
@@ -46,29 +63,11 @@ export const usePushNotifications = () => {
     );
 
     return () => {
-      if (notificationListener.current) {
-        Notifications.removeNotificationSubscription(notificationListener.current);
-      }
-      if (responseListener.current) {
-        Notifications.removeNotificationSubscription(responseListener.current);
-      }
+      notificationListener.current?.remove();
+      responseListener.current?.remove();
     };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
-
-  const registerTokenWithBackend = async (token: string) => {
-    try {
-      await api.post("/users/push-token", { expoPushToken: token });
-      console.log("[PUSH] Token registered with backend");
-    } catch (error) {
-      console.error("[PUSH] Failed to register token:", error);
-    }
-  };
-
-  const handleNotificationTap = (data: any) => {
-    // Handle navigation based on notification type
-    console.log("[PUSH] Notification tapped with data:", data);
-    // You can use router.push() here to navigate to specific screens
-  };
 
   return {
     expoPushToken,

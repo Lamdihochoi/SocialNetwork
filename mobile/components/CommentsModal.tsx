@@ -1,8 +1,6 @@
 import { useComments } from "@/hooks/useComments";
 import { useCurrentUser } from "@/hooks/useCurrentUser";
 import { Post, Comment } from "@/types";
-import { useQuery } from "@tanstack/react-query";
-import { useApiClient, commentApi } from "@/utils/api";
 import { formatDate } from "@/utils/formatters";
 import { Ionicons, Feather } from "@expo/vector-icons";
 import {
@@ -25,20 +23,14 @@ interface CommentsModalProps {
 }
 
 const CommentsModal = ({ selectedPost, onClose }: CommentsModalProps) => {
-  const { commentText, setCommentText, createComment, isCreatingComment } =
-    useComments();
+  const { commentText, setCommentText, createComment, isCreatingComment, comments: hookComments, isLoadingComments: hookLoading } =
+    useComments(selectedPost?._id);
   const { currentUser } = useCurrentUser();
-  const api = useApiClient();
   const insets = useSafeAreaInsets();
 
-  const { data: commentsData, isLoading: isLoadingComments } = useQuery({
-    queryKey: ["comments", selectedPost?._id],
-    queryFn: () => commentApi.getComments(api, selectedPost!._id),
-    enabled: !!selectedPost,
-    select: (response) => response.data.comments as Comment[],
-  });
-
-  const comments = commentsData || [];
+  // Use comments from hook directly (no duplicate query needed)
+  const comments = hookComments || [];
+  const isLoadingComments = hookLoading;
 
   const handleClose = () => {
     onClose();
@@ -157,7 +149,7 @@ const CommentsModal = ({ selectedPost, onClose }: CommentsModalProps) => {
               )}
 
               {/* Comments List */}
-              {comments.map((comment, index) => (
+              {comments.map((comment: Comment) => (
                 <View
                   key={comment._id}
                   className="mx-3 mb-2 bg-white rounded-2xl p-4"

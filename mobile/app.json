@@ -9,9 +9,12 @@
     "userInterfaceStyle": "automatic",
     "newArchEnabled": true,
     "ios": {
-      "supportsTablet": true
+      "bundleIdentifier": "com.socialnetwork.mobile",
+      "supportsTablet": true,
+      "jsEngine": "hermes"
     },
     "android": {
+      "package": "com.socialnetwork.mobile",
       "adaptiveIcon": {
         "backgroundColor": "#E6F4FE",
         "foregroundImage": "./assets/images/android-icon-foreground.png",
@@ -19,7 +22,10 @@
         "monochromeImage": "./assets/images/android-icon-monochrome.png"
       },
       "edgeToEdgeEnabled": true,
-      "predictiveBackGestureEnabled": false
+      "predictiveBackGestureEnabled": false,
+      "jsEngine": "hermes",
+      "enableProguardInReleaseBuilds": true,
+      "enableShrinkResourcesInReleaseBuilds": true
     },
     "web": {
       "output": "static",
@@ -46,7 +52,8 @@
         {
           "photosPermission": "Cho phép ứng dụng lưu ảnh vào thư viện.",
           "savePhotosPermission": "Cho phép ứng dụng lưu ảnh vào thư viện.",
-          "isAccessMediaLocationEnabled": true
+          "isAccessMediaLocationEnabled": true,
+          "includeAudio": false
         }
       ],
       [

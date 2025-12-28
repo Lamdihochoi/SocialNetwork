@@ -102,7 +102,7 @@ export default function Index() {
                     resizeMode="contain"
                   />
                   <Text className="text-black font-medium text-base">
-                    Continue with Google
+                    Tiếp tục với Google
                   </Text>
                 </View>
               )}
@@ -131,7 +131,7 @@ export default function Index() {
                     resizeMode="contain"
                   />
                   <Text className="text-black font-medium text-base">
-                    Continue with Apple
+                    Tiếp tục với Apple
                   </Text>
                 </View>
               )}
@@ -152,29 +152,29 @@ export default function Index() {
             >
               <View className="flex-row items-center justify-center">
                 <Text className="text-white font-medium text-base">
-                  Continue with Email
+                  Tiếp tục với Email
                 </Text>
               </View>
             </TouchableOpacity>
           </Link>
 
           <View className="flex-row justify-center mt-6">
-            <Text className="text-gray-500">Don't have an account? </Text>
+            <Text className="text-gray-500">Chưa có tài khoản? </Text>
             <Link href={"/(auth)/register" as any} asChild>
               <TouchableOpacity>
-                <Text className="text-blue-500 font-medium">Sign Up</Text>
+                <Text className="text-blue-500 font-medium">Đăng ký</Text>
               </TouchableOpacity>
             </Link>
           </View>
 
           {/* Terms and Privacy */}
           <Text className="text-center text-gray-500 text-xs leading-4 mt-6 px-2">
-            By signing up, you agree to our{" "}
-            <Text className="text-blue-500">Terms</Text>
+            Bằng việc đăng ký, bạn đồng ý với{" "}
+            <Text className="text-blue-500">Điều khoản</Text>
             {", "}
-            <Text className="text-blue-500">Privacy Policy</Text>
-            {", and "}
-            <Text className="text-blue-500">Cookie Use</Text>.
+            <Text className="text-blue-500">Chính sách bảo mật</Text>
+            {", và "}
+            <Text className="text-blue-500">Chính sách Cookie</Text>.
           </Text>
         </View>
       </View>

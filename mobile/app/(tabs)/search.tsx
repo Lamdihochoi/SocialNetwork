@@ -202,6 +202,7 @@ const SearchScreen = () => {
                 onLike={toggleLike}
                 onDelete={deletePost}
                 onComment={(post: Post) => setSelectedPostId(post._id)}
+                onPress={(post: Post) => router.push(`/post/${post._id}`)}
                 currentUser={currentUser}
                 isLiked={checkIsLiked(post.likes, currentUser)}
               />

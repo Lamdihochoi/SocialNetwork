@@ -1,7 +1,8 @@
 import { Notification } from "@/types";
 import { formatDate } from "@/utils/formatters";
-import { Feather } from "@expo/vector-icons";
+import { Feather, Ionicons } from "@expo/vector-icons";
 import { View, Text, Alert, Image, TouchableOpacity } from "react-native";
+import { memo } from "react";
 
 interface NotificationCardProps {
   notification: Notification;
@@ -18,11 +19,11 @@ const NotificationCard = ({
     const name = `${notification.from.firstName} ${notification.from.lastName}`;
     switch (notification.type) {
       case "like":
-        return `${name} liked your post`;
+        return `đã thích bài viết của bạn`;
       case "comment":
-        return `${name} commented on your post`;
+        return `đã bình luận về bài viết của bạn`;
       case "follow":
-        return `${name} started following you`;
+        return `đã bắt đầu theo dõi bạn`;
       default:
         return "";
     }
@@ -31,24 +32,40 @@ const NotificationCard = ({
   const getNotificationIcon = () => {
     switch (notification.type) {
       case "like":
-        return <Feather name="heart" size={20} color="#E0245E" />;
+        return (
+          <View className="w-7 h-7 bg-red-500 rounded-full items-center justify-center">
+            <Ionicons name="heart" size={16} color="white" />
+          </View>
+        );
       case "comment":
-        return <Feather name="message-circle" size={20} color="#1DA1F2" />;
+        return (
+          <View className="w-7 h-7 bg-blue-500 rounded-full items-center justify-center">
+            <Ionicons name="chatbubble" size={14} color="white" />
+          </View>
+        );
       case "follow":
-        return <Feather name="user-plus" size={20} color="#17BF63" />;
+        return (
+          <View className="w-7 h-7 bg-green-500 rounded-full items-center justify-center">
+            <Ionicons name="person-add" size={14} color="white" />
+          </View>
+        );
       default:
-        return <Feather name="bell" size={20} color="#657786" />;
+        return (
+          <View className="w-7 h-7 bg-gray-400 rounded-full items-center justify-center">
+            <Ionicons name="notifications" size={14} color="white" />
+          </View>
+        );
     }
   };
 
   const handleDelete = () => {
     Alert.alert(
-      "Delete Notification",
-      "Are you sure you want to delete this notification?",
+      "Xóa thông báo",
+      "Bạn có chắc muốn xóa thông báo này?",
       [
-        { text: "Cancel", style: "cancel" },
+        { text: "Hủy", style: "cancel" },
         {
-          text: "Delete",
+          text: "Xóa",
           style: "destructive",
           onPress: () => onDelete(notification._id),
         },
@@ -60,77 +77,90 @@ const NotificationCard = ({
     <TouchableOpacity 
       activeOpacity={0.7}
       onPress={() => onPress(notification)}
-      className={`border-b border-gray-100 ${!notification.isRead ? "bg-blue-50" : "bg-white"}`}
+      className={`${!notification.isRead ? "bg-blue-50" : "bg-white"}`}
     >
       <View className="flex-row p-4">
+        {/* Avatar với icon loại thông báo */}
         <View className="relative mr-3">
           <Image
-            source={{ uri: notification.from.profilePicture }}
-            className="size-12 rounded-full"
+            source={{ 
+              uri: notification.from.profilePicture || "https://placehold.co/100x100?text=User" 
+            }}
+            className="w-14 h-14 rounded-full"
           />
-
-          <View className="absolute -bottom-1 -right-1 size-6 bg-white rounded-full items-center justify-center shadow-sm">
+          {/* Icon loại thông báo */}
+          <View className="absolute -bottom-1 -right-1">
             {getNotificationIcon()}
           </View>
         </View>
 
+        {/* Nội dung thông báo */}
         <View className="flex-1">
-          <View className="flex-row items-start justify-between mb-1">
-            <View className="flex-1">
-              <Text className="text-gray-900 text-base leading-5 mb-1">
+          <View className="flex-row items-start justify-between">
+            <View className="flex-1 pr-2">
+              {/* Text chính */}
+              <Text className="text-gray-900 text-[15px] leading-5 mb-1">
                 <Text className="font-bold">
                   {notification.from.firstName} {notification.from.lastName}
                 </Text>
-                <Text className="text-gray-500">
-                  {" "}
-                  @{notification.from.username}
+                <Text className={!notification.isRead ? "font-medium" : ""}>
+                  {" "}{getNotificationText()}
                 </Text>
               </Text>
-              <Text className={`text-gray-700 text-sm mb-2 ${!notification.isRead ? "font-semibold" : ""}`}>
-                {getNotificationText()}
-              </Text>
+
+              {/* Thời gian */}
+              <View className="flex-row items-center">
+                <Text className="text-gray-400 text-xs">
+                  {formatDate(notification.createdAt)}
+                </Text>
+                {!notification.isRead && (
+                  <View className="w-2 h-2 bg-blue-500 rounded-full ml-2" />
+                )}
+              </View>
             </View>
 
-            <TouchableOpacity className="ml-2 p-1" onPress={handleDelete}>
-              <Feather name="trash" size={16} color="#E0245E" />
+            {/* Nút xóa */}
+            <TouchableOpacity 
+              className="w-8 h-8 rounded-full bg-gray-100 items-center justify-center" 
+              onPress={handleDelete}
+            >
+              <Feather name="x" size={14} color="#9ca3af" />
             </TouchableOpacity>
           </View>
 
+          {/* Preview bài viết nếu có */}
           {notification.post && (
-            <View className="bg-white/50 rounded-lg p-3 mb-2 border border-gray-100">
-              <Text className="text-gray-700 text-sm mb-1" numberOfLines={3}>
+            <View className="mt-2 bg-gray-50 rounded-xl p-3 border border-gray-100">
+              <Text className="text-gray-600 text-sm" numberOfLines={2}>
                 {notification.post.content}
               </Text>
               {notification.post.image && (
                 <Image
                   source={{ uri: notification.post.image }}
-                  className="w-full h-32 rounded-lg mt-2"
+                  className="w-full h-24 rounded-lg mt-2"
                   resizeMode="cover"
                 />
               )}
             </View>
           )}
 
+          {/* Preview bình luận nếu có */}
           {notification.comment && (
-            <View className="bg-blue-50/50 rounded-lg p-3 mb-2 border border-blue-100">
-              <Text className="text-gray-600 text-xs mb-1">Comment:</Text>
-              <Text className="text-gray-700 text-sm" numberOfLines={2}>
-                &ldquo;{notification.comment.content}&rdquo;
+            <View className="mt-2 bg-blue-50 rounded-xl p-3 border border-blue-100">
+              <View className="flex-row items-center mb-1">
+                <Ionicons name="chatbubble" size={12} color="#3b82f6" />
+                <Text className="text-blue-500 text-xs font-medium ml-1">Bình luận</Text>
+              </View>
+              <Text className="text-gray-700 text-sm italic" numberOfLines={2}>
+                "{notification.comment.content}"
               </Text>
             </View>
           )}
-
-          <View className="flex-row items-center">
-             <Text className="text-gray-400 text-xs mr-2">
-              {formatDate(notification.createdAt)}
-            </Text>
-            {!notification.isRead && (
-              <View className="w-2 h-2 bg-blue-500 rounded-full" />
-            )}
-          </View>
         </View>
       </View>
     </TouchableOpacity>
   );
 };
-export default NotificationCard;
+
+// ⚡ PERFORMANCE: Wrap with React.memo
+export default memo(NotificationCard);

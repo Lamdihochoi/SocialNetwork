@@ -12,6 +12,7 @@ import {
   ActivityIndicator,
   Linking,
   Platform,
+  FlatList,
 } from "react-native";
 import {
   SafeAreaView,
@@ -25,12 +26,88 @@ import { Conversation, Message, User } from "@/types";
 import { formatDate } from "@/utils/formatters";
 import * as ImagePicker from "expo-image-picker";
 import * as DocumentPicker from "expo-document-picker";
+import * as MediaLibrary from "expo-media-library";
 import ImageViewing from "react-native-image-viewing";
 // Use legacy API for Expo SDK 54+ compatibility
 import * as FileSystem from "expo-file-system/legacy";
-// E2E Encryption
-import { encryptMessage, decryptMessage } from "@/utils/encryption";
+// E2E Encryption - Per-message dynamic keys with middleware
+import { 
+  encryptMessage, 
+  decryptMessage, 
+  decryptMessageObject, 
+  decryptMessageList, 
+  decryptForList 
+} from "@/utils/encryptionV2";
+// 🎨 New components
+import { StickerPicker } from "@/components/StickerPicker";
+import { MessageBubble } from "@/components/MessageBubble";
+import { Sticker } from "@/data/stickers";
+import { useRouter } from "expo-router";
 
+// Helper: Format last seen time
+const formatLastSeen = (lastSeen: string | Date): string => {
+  const now = new Date();
+  const lastSeenDate = new Date(lastSeen);
+  const diffMs = now.getTime() - lastSeenDate.getTime();
+  const diffMins = Math.floor(diffMs / 60000);
+  const diffHours = Math.floor(diffMins / 60);
+  const diffDays = Math.floor(diffHours / 24);
+
+  if (diffMins < 1) return "vừa xong";
+  if (diffMins < 60) return `${diffMins} phút trước`;
+  if (diffHours < 24) return `${diffHours} giờ trước`;
+  if (diffDays < 7) return `${diffDays} ngày trước`;
+  return lastSeenDate.toLocaleDateString("vi-VN");
+};
+
+// Helper: Get file type icon and label
+const getFileTypeInfo = (fileName: string, mimeType?: string): { icon: string; label: string; color: string } => {
+  const ext = fileName?.split('.').pop()?.toLowerCase() || '';
+  const type = mimeType?.toLowerCase() || '';
+  
+  // PDF
+  if (ext === 'pdf' || type.includes('pdf')) {
+    return { icon: 'file-text', label: 'PDF', color: '#E53E3E' };
+  }
+  
+  // Word
+  if (['doc', 'docx'].includes(ext) || type.includes('word') || type.includes('document')) {
+    return { icon: 'file-text', label: 'Word', color: '#2B6CB0' };
+  }
+  
+  // Excel
+  if (['xls', 'xlsx'].includes(ext) || type.includes('excel') || type.includes('spreadsheet')) {
+    return { icon: 'grid', label: 'Excel', color: '#38A169' };
+  }
+  
+  // PowerPoint
+  if (['ppt', 'pptx'].includes(ext) || type.includes('powerpoint') || type.includes('presentation')) {
+    return { icon: 'monitor', label: 'PowerPoint', color: '#DD6B20' };
+  }
+  
+  // Text
+  if (['txt', 'log', 'csv'].includes(ext) || type.includes('text')) {
+    return { icon: 'file-text', label: ext.toUpperCase(), color: '#718096' };
+  }
+  
+  // Archive
+  if (['zip', 'rar', '7z', 'tar', 'gz'].includes(ext) || type.includes('zip') || type.includes('archive')) {
+    return { icon: 'archive', label: ext.toUpperCase(), color: '#805AD5' };
+  }
+  
+  // Audio
+  if (['mp3', 'wav', 'ogg', 'm4a'].includes(ext) || type.includes('audio')) {
+    return { icon: 'music', label: 'Audio', color: '#D53F8C' };
+  }
+  
+  // Video
+  if (['mp4', 'mov', 'avi', 'mkv'].includes(ext) || type.includes('video')) {
+    return { icon: 'video', label: 'Video', color: '#319795' };
+  }
+  
+  // Default
+  return { icon: 'file', label: ext.toUpperCase() || 'File', color: '#4A5568' };
+};
 const MessagesScreen = () => {
   const insets = useSafeAreaInsets();
   const [searchText, setSearchText] = useState("");
@@ -47,12 +124,35 @@ const MessagesScreen = () => {
   const [isNewMessageModalOpen, setIsNewMessageModalOpen] = useState(false);
   const [imageViewerVisible, setImageViewerVisible] = useState(false);
   const [imageViewerIndex, setImageViewerIndex] = useState(0);
+  const [isSharing, setIsSharing] = useState(false); // Tránh duplicate share requests
+  const [isStickerPickerOpen, setIsStickerPickerOpen] = useState(false); // 🎨 Sticker picker
+  // ✏️🗑️ Edit/Delete message state
+  const [selectedMessage, setSelectedMessage] = useState<Message | null>(null);
+  const [isEditModalOpen, setIsEditModalOpen] = useState(false);
+  const [editMessageText, setEditMessageText] = useState("");
   const messagesEndRef = useRef<ScrollView>(null);
   const api = useApiClient();
   const queryClient = useQueryClient();
   const { currentUser } = useCurrentUser();
-  const { joinConversation, leaveConversation, onReceiveMessage, isConnected } =
-    useSocket();
+  const router = useRouter();  // 🔗 For profile navigation
+  const { 
+    joinConversation, 
+    leaveConversation, 
+    onReceiveMessage, 
+    onMessagesRead,
+    isConnected,
+    isUserOnline,
+    emitMarkRead,
+    emitSendMessage,
+    setOnNewMessageCallback,
+  } = useSocket();
+
+  // 🔐 E2E Encryption wrapper for sending messages
+  // Uses imported encryptMessage from encryptionV2
+  const encryptForSend = useCallback((text: string) => {
+    if (!currentUser?._id || !selectedOtherUserId) return text;
+    return encryptMessage(text, currentUser._id, selectedOtherUserId);
+  }, [currentUser?._id, selectedOtherUserId]);
 
   // Fetch mutual follows for horizontal scroll (Friends to Message)
   // ⚠️ Lưu ý: Trong code của bạn đang gọi `messageApi.getFriends(api)`,
@@ -84,10 +184,17 @@ const MessagesScreen = () => {
     data: conversationsData,
     isLoading: isLoadingConversations,
     error: conversationsError,
+    refetch: refetchConversations,
   } = useQuery({
     queryKey: ["conversations"],
     queryFn: () => messageApi.getConversations(api),
     select: (response) => response.data.conversations,
+    // ⚡ INSTANT: Always fresh data
+    staleTime: 0, // Luôn fetch mới
+    gcTime: 1000 * 60 * 10, // Cache 10 phút
+    refetchOnMount: true,
+    refetchOnWindowFocus: true,
+    refetchInterval: 10000, // Auto sync mỗi 10s
   });
 
   const conversations = conversationsData || [];
@@ -100,17 +207,42 @@ const MessagesScreen = () => {
     refetch: refetchMessages,
   } = useQuery({
     queryKey: ["messageHistory", selectedOtherUserId],
-    queryFn: () => messageApi.getMessageHistory(api, selectedOtherUserId!),
-
+    queryFn: async () => {
+      const response = await messageApi.getMessageHistory(api, selectedOtherUserId!);
+      return {
+        messages: response.data.messages || [],
+        conversation: response.data.conversation || null,
+      };
+    },
     enabled: !!selectedOtherUserId && isChatOpen,
-
-    select: (response) => ({
-      messages: response.data.messages || [],
-      conversation: response.data.conversation || null,
-    }),
+    // ⚡ INSTANT: Always get fresh messages
+    staleTime: 0, // Luôn fetch mới khi mở chat
+    gcTime: 1000 * 60 * 30, // Cache 30 phút
+    refetchOnMount: 'always',
+    placeholderData: (prev) => prev, // Hiển thị data cũ trong khi loading
   });
 
-  const { messages = [], conversation } = messageHistoryData || {};
+  // 🔐 Pre-decrypt messages using middleware + deduplicate
+  const messages = useMemo(() => {
+    const raw = messageHistoryData?.messages || [];
+    
+    // 1. Deduplicate
+    const seen = new Set<string>();
+    const unique = raw.filter((msg: any) => {
+      if (seen.has(msg._id)) return false;
+      seen.add(msg._id);
+      return true;
+    });
+    
+    // 2. Pre-decrypt all messages (if we have both user IDs)
+    if (currentUser?._id && selectedOtherUserId) {
+      return decryptMessageList(unique, currentUser._id, selectedOtherUserId);
+    }
+    
+    return unique;
+  }, [messageHistoryData?.messages, currentUser?._id, selectedOtherUserId]);
+  
+  const conversation = messageHistoryData?.conversation || null;
 
   // Send message mutation
   const sendMessageMutation = useMutation({
@@ -138,7 +270,12 @@ const MessagesScreen = () => {
         sender: currentUser,
         receiver: { _id: receiverId },
         content: content,
-        attachment: file ? { url: file.uri, type: file.type, fileName: file.name } : null,
+        attachment: file ? { 
+          url: file.uri, 
+          // Use simplified type like server does
+          type: file.type.startsWith('image') ? 'image' : file.type.startsWith('video') ? 'video' : 'file',
+          fileName: file.name 
+        } : null,
         createdAt: new Date().toISOString(),
         isRead: false,
         pending: true, // Marker to show "Sending..." state if needed
@@ -172,15 +309,289 @@ const MessagesScreen = () => {
       );
     },
 
-    onSettled: () => {
-      // Always refetch after error or success to ensure data sync
-      queryClient.invalidateQueries({
-        queryKey: ["messageHistory", selectedOtherUserId],
+    onSuccess: (response, { receiverId }) => {
+      // 🔥 Replace temp message with real one from server
+      const realMessage = response.data.message;
+      queryClient.setQueryData(["messageHistory", receiverId], (old: any) => {
+        if (!old) return old;
+        return {
+          ...old,
+          messages: old.messages.map((msg: any) =>
+            msg._id.startsWith("temp-") ? { ...realMessage, pending: false } : msg
+          ),
+        };
       });
-      queryClient.invalidateQueries({ queryKey: ["conversations"] });
-      queryClient.invalidateQueries({ queryKey: ["friends"] });
+      
+      // ⚡ Update conversations list immediately (optimistic)
+      queryClient.setQueryData(["conversations"], (old: any) => {
+        if (!old || !Array.isArray(old)) return old;
+        const updated = old.map((conv: any) => {
+          if (conv.user._id === receiverId) {
+            return {
+              ...conv,
+              lastMessage: realMessage.content,
+              lastMessageAt: realMessage.createdAt,
+              isRead: true,
+            };
+          }
+          return conv;
+        });
+        // Sort to move this conversation to top
+        return updated.sort((a: any, b: any) => 
+          new Date(b.lastMessageAt).getTime() - new Date(a.lastMessageAt).getTime()
+        );
+      });
+      
+      // Also refetch in background for server confirmation
+      queryClient.invalidateQueries({ queryKey: ["conversations"], refetchType: 'none' });
+    },
+
+    // ⚡ NO onSettled - socket handles realtime sync, don't refetch
+  });
+
+  // ✏️ Edit Message Mutation
+  const editMessageMutation = useMutation({
+    mutationFn: async ({ messageId, content }: { messageId: string; content: string }) => {
+      return messageApi.editMessage(api, messageId, content);
+    },
+    onMutate: async ({ messageId, content }) => {
+      // Optimistically update the message
+      queryClient.setQueryData(["messageHistory", selectedOtherUserId], (old: any) => {
+        if (!old) return old;
+        return {
+          ...old,
+          messages: old.messages.map((msg: any) =>
+            msg._id === messageId ? { ...msg, content, isEdited: true } : msg
+          ),
+        };
+      });
+    },
+    onSuccess: () => {
+      setIsEditModalOpen(false);
+      setSelectedMessage(null);
+      setEditMessageText("");
+    },
+    onError: (err: any) => {
+      Alert.alert("Lỗi", err.response?.data?.error || "Không thể chỉnh sửa tin nhắn");
+      queryClient.invalidateQueries({ queryKey: ["messageHistory", selectedOtherUserId] });
     },
   });
+
+  // 🗑️ Delete Message Mutation
+  const deleteMessageMutation = useMutation({
+    mutationFn: async (messageId: string) => {
+      return messageApi.deleteMessage(api, messageId);
+    },
+    onMutate: async (messageId) => {
+      // Optimistically update the message as deleted
+      queryClient.setQueryData(["messageHistory", selectedOtherUserId], (old: any) => {
+        if (!old) return old;
+        return {
+          ...old,
+          messages: old.messages.map((msg: any) =>
+            msg._id === messageId ? { ...msg, content: "Tin nhắn đã bị xóa", isDeleted: true } : msg
+          ),
+        };
+      });
+    },
+    onSuccess: () => {
+      setSelectedMessage(null);
+    },
+    onError: (err: any) => {
+      Alert.alert("Lỗi", err.response?.data?.error || "Không thể xóa tin nhắn");
+      queryClient.invalidateQueries({ queryKey: ["messageHistory", selectedOtherUserId] });
+    },
+  });
+
+  // 🗑️ Delete Conversation Mutation (with optimistic update)
+  const deleteConversationMutation = useMutation({
+    mutationFn: async (conversationId: string) => {
+      return messageApi.deleteConversation(api, conversationId);
+    },
+    onSuccess: () => {
+      // Immediately refetch conversations list
+      queryClient.invalidateQueries({ queryKey: ["conversations"] });
+      // Clear all message history caches
+      queryClient.removeQueries({ queryKey: ["messageHistory"] });
+      Alert.alert("✅ Thành công", "Cuộc trò chuyện đã được xóa!");
+    },
+    onError: (err: any) => {
+      Alert.alert("Lỗi", err.response?.data?.error || "Không thể xóa cuộc trò chuyện");
+    },
+  });
+
+  // 🧹 Clear Conversation Mutation
+  const clearConversationMutation = useMutation({
+    mutationFn: async (conversationId: string) => {
+      return messageApi.clearConversation(api, conversationId);
+    },
+    onSuccess: (response, conversationId) => {
+      // Immediately refetch conversations list
+      queryClient.invalidateQueries({ queryKey: ["conversations"] });
+      
+      // Find and invalidate specific message history
+      const conv = conversations.find((c: any) => c._id === conversationId);
+      if (conv?.user._id) {
+        queryClient.invalidateQueries({ queryKey: ["messageHistory", conv.user._id] });
+      }
+      
+      Alert.alert("✅ Thành công", `Đã xóa ${response.data.deletedCount} tin nhắn!`);
+    },
+    onError: (err: any) => {
+      Alert.alert("Lỗi", err.response?.data?.error || "Không thể xóa tin nhắn");
+    },
+  });
+
+  // 🔥 Long press handler for conversation actions
+  const handleConversationLongPress = (conversation: any) => {
+    Alert.alert(
+      conversation.user.firstName + " " + conversation.user.lastName,
+      "Chọn hành động:",
+      [
+        {
+          text: "🧹 Xóa tin nhắn",
+          onPress: () => {
+            Alert.alert(
+              "Xác nhận",
+              "Xóa tất cả tin nhắn trong cuộc trò chuyện này?",
+              [
+                { text: "Hủy", style: "cancel" },
+                { 
+                  text: "Xóa tin nhắn", 
+                  style: "destructive",
+                  onPress: () => clearConversationMutation.mutate(conversation._id)
+                },
+              ]
+            );
+          },
+        },
+        {
+          text: "🗑️ Xóa cuộc trò chuyện",
+          style: "destructive",
+          onPress: () => {
+            Alert.alert(
+              "⚠️ Xác nhận xóa",
+              "Xóa hoàn toàn cuộc trò chuyện này? Không thể hoàn tác!",
+              [
+                { text: "Hủy", style: "cancel" },
+                { 
+                  text: "Xóa", 
+                  style: "destructive",
+                  onPress: () => deleteConversationMutation.mutate(conversation._id)
+                },
+              ]
+            );
+          },
+        },
+        { text: "Đóng", style: "cancel" },
+      ]
+    );
+  };
+  // 🔥 Long press handler for message actions
+  const handleMessageLongPress = (message: Message) => {
+    // Only allow actions on own messages
+    if (message.sender._id !== currentUser?._id) return;
+    if (message.isDeleted) return;
+    
+    setSelectedMessage(message);
+    
+    Alert.alert(
+      "Tùy chọn tin nhắn",
+      "Bạn muốn làm gì với tin nhắn này?",
+      [
+        {
+          text: "✏️ Chỉnh sửa",
+          onPress: () => {
+            setEditMessageText(message.content); // Already decrypted in useMemo
+            setIsEditModalOpen(true);
+          },
+        },
+        {
+          text: "🗑️ Xóa",
+          style: "destructive",
+          onPress: () => {
+            Alert.alert(
+              "Xác nhận xóa",
+              "Bạn có chắc muốn xóa tin nhắn này?",
+              [
+                { text: "Hủy", style: "cancel" },
+                {
+                  text: "Xóa",
+                  style: "destructive",
+                  onPress: () => deleteMessageMutation.mutate(message._id),
+                },
+              ]
+            );
+          },
+        },
+        { text: "Hủy", style: "cancel", onPress: () => setSelectedMessage(null) },
+      ]
+    );
+  };
+
+  // ✏️ Submit edited message
+  const handleSubmitEdit = () => {
+    if (!selectedMessage || !editMessageText.trim()) return;
+    editMessageMutation.mutate({
+      messageId: selectedMessage._id,
+      content: editMessageText.trim(),
+    });
+  };
+
+  // 🔔 GLOBAL: Listen for new messages to update conversations list (even when chat is closed)
+  useEffect(() => {
+    const handleGlobalMessage = (message: any) => {
+      console.log("[GLOBAL] New message received:", message?._id);
+      
+      // Determine the other user in this conversation
+      const otherUserId = message?.sender?._id === currentUser?._id 
+        ? message?.receiver?._id 
+        : message?.sender?._id;
+      
+      // 🔥 FIX: Skip own messages - optimistic update already added them
+      const isOwnMessage = message?.sender?._id === currentUser?._id;
+      
+      // ⚡ INSTANT SYNC: Update conversations list immediately
+      queryClient.setQueryData(["conversations"], (old: any) => {
+        if (!old || !Array.isArray(old)) return old;
+        const updatedConversations = old.map((conv: any) => {
+          if (conv.user._id === otherUserId) {
+            return {
+              ...conv,
+              lastMessage: message.content,
+              lastMessageAt: message.createdAt,
+              isRead: isOwnMessage ? true : false, // Unread if from other user
+            };
+          }
+          return conv;
+        });
+        // Sort by lastMessageAt to move updated conversation to top
+        return updatedConversations.sort((a: any, b: any) => 
+          new Date(b.lastMessageAt).getTime() - new Date(a.lastMessageAt).getTime()
+        );
+      });
+      
+      // 🔄 Also invalidate to get fresh data from server (background refresh)
+      queryClient.invalidateQueries({ queryKey: ["conversations"], refetchType: 'none' });
+      
+      if (isOwnMessage) {
+        console.log("[GLOBAL] Skipping own message - already optimistically added");
+        return;
+      }
+      
+      // If chat is closed, invalidate message history so it refetches when opened
+      if (!isChatOpen && otherUserId) {
+        queryClient.invalidateQueries({ queryKey: ["messageHistory", otherUserId], refetchType: 'none' });
+      }
+    };
+
+    // Register the global callback
+    setOnNewMessageCallback(handleGlobalMessage);
+
+    return () => {
+      setOnNewMessageCallback(null);
+    };
+  }, [isChatOpen, selectedOtherUserId, queryClient, setOnNewMessageCallback, currentUser?._id]);
 
   // Listen for new messages via socket
   useEffect(() => {
@@ -188,28 +599,104 @@ const MessagesScreen = () => {
 
     joinConversation(conversation._id);
 
+    // ✅ Mark messages as read when opening chat
+    if (currentUser?._id) {
+      emitMarkRead(conversation._id, currentUser._id);
+    }
+
     const cleanup = onReceiveMessage((data: any) => {
-      // Check if the incoming message is relevant to the currently open chat
-      if (
+      const incomingMessage = data.message || data;
+      console.log("[SOCKET] Received message in chat:", incomingMessage?._id);
+      
+      // 🔥 FIX: Check if message belongs to current conversation
+      // Message is relevant if:
+      // 1. Same conversationId, OR
+      // 2. Message is between current user and selected other user (either direction)
+      const isRelevant = 
         data.conversationId === conversation._id ||
-        (data.message?.sender?._id === selectedOtherUserId &&
-          data.message?.receiver?._id === currentUser?._id)
-      ) {
-        queryClient.invalidateQueries({
-          queryKey: ["messageHistory", selectedOtherUserId],
-        });
+        (incomingMessage?.sender?._id === selectedOtherUserId && incomingMessage?.receiver?._id === currentUser?._id) ||
+        (incomingMessage?.sender?._id === currentUser?._id && incomingMessage?.receiver?._id === selectedOtherUserId);
+      
+      // 🔥 FIX: Skip own messages - optimistic update already added them
+      const isOwnMessage = incomingMessage?.sender?._id === currentUser?._id;
+      
+      if (isRelevant && !isOwnMessage) {
+        // 🚀 Add message only if not already exists
+        queryClient.setQueryData(
+          ["messageHistory", selectedOtherUserId],
+          (old: any) => {
+            if (!old) return old;
+            
+            // 🔥 FIX: Check if message already exists (prevents duplicate from multiple socket rooms)
+            const exists = old.messages?.some((m: any) => m._id === incomingMessage._id);
+            if (exists) {
+              console.log("[SOCKET] Skipping duplicate:", incomingMessage._id);
+              return old;
+            }
+            
+            // Add new message
+            console.log("[SOCKET] Adding new message:", incomingMessage._id);
+            return {
+              ...old,
+              messages: [...(old.messages || []), incomingMessage],
+            };
+          }
+        );
+        
+        // Cập nhật conversations list
         queryClient.invalidateQueries({ queryKey: ["conversations"] });
+        
+        // Mark new incoming messages as read immediately
+        emitMarkRead(conversation._id, currentUser._id);
+      }
+    });
+
+    // 👁️ Listen for message read events (when recipient reads our messages)
+    const cleanupMessagesRead = onMessagesRead((data) => {
+      if (data.conversationId === conversation._id) {
+        console.log("[SEEN] Messages marked as read by:", data.readBy);
+        
+        // Update all messages from current user as read
+        queryClient.setQueryData(
+          ["messageHistory", selectedOtherUserId],
+          (old: any) => {
+            if (!old?.messages) return old;
+            
+            return {
+              ...old,
+              messages: old.messages.map((msg: any) => 
+                msg.sender._id === currentUser?._id 
+                  ? { ...msg, isRead: true }
+                  : msg
+              ),
+            };
+          }
+        );
       }
     });
 
     return () => {
       leaveConversation(conversation._id);
       cleanup();
+      cleanupMessagesRead();
     };
   }, [conversation?._id, isChatOpen, selectedOtherUserId, currentUser]);
 
-  // ✅ HÀM MỞ CHAT: Dùng cho cả Conversations cũ và Friends mới
+  // ✅ HÀM MỞ CHAT: Dùng cho cả Conversations cũ và Friends mới (với prefetch)
   const openConversation = async (otherUserId: string) => {
+    // ⚡ Prefetch messages BEFORE opening chat for instant display
+    queryClient.prefetchQuery({
+      queryKey: ["messageHistory", otherUserId],
+      queryFn: async () => {
+        const response = await messageApi.getMessageHistory(api, otherUserId);
+        return {
+          messages: response.data.messages || [],
+          conversation: response.data.conversation || null,
+        };
+      },
+      staleTime: 1000 * 3,
+    });
+    
     setSelectedOtherUserId(otherUserId);
     setIsChatOpen(true);
   };
@@ -222,25 +709,72 @@ const MessagesScreen = () => {
     setSelectedOtherUserId(null);
     setNewMessage("");
     setSelectedFile(null);
-    // Refresh conversation list để xem tin nhắn mới có isRead chưa
-    queryClient.invalidateQueries({ queryKey: ["conversations"] });
+    // ⚡ Immediately sync conversation list
+    refetchConversations();
   };
 
-  // Send message with encryption
+  // 🚀 SOCKET-FIRST: Send message with instant UI update
   const sendMessage = useCallback(() => {
     if ((newMessage.trim() || selectedFile) && selectedOtherUserId) {
-      // Encrypt message content before sending
-      const encryptedContent = newMessage.trim() 
-        ? encryptMessage(newMessage.trim()) 
-        : "";
+      const messageContent = newMessage.trim();
+      const tempId = "temp-" + Date.now();
       
-      sendMessageMutation.mutate({
-        receiverId: selectedOtherUserId,
-        content: encryptedContent,
-        file: selectedFile || undefined,
-      });
+      // 🔐 ENCRYPT FIRST: Encrypt content before sending (E2E)
+      const encryptedContent = messageContent ? encryptForSend(messageContent) : "";
+      
+      // 2️⃣ Clear input immediately
+      setNewMessage("");
+      setSelectedFile(null);
+      
+      // 3️⃣ SOCKET-FIRST: Send ENCRYPTED via socket for instant delivery (text only)
+      if (isConnected && !selectedFile) {
+        // 🔥 Only add optimistic for socket path - socket doesn't trigger onMutate
+        const optimisticMessage = {
+          _id: tempId,
+          sender: currentUser,
+          receiver: { _id: selectedOtherUserId },
+          content: encryptedContent,
+          attachment: null,
+          createdAt: new Date().toISOString(),
+          isRead: false,
+          pending: true,
+        };
+        
+        queryClient.setQueryData(["messageHistory", selectedOtherUserId], (old: any) => {
+          const oldMessages = old?.messages || [];
+          const newData = { ...old, messages: [...oldMessages, optimisticMessage] };
+          console.log("[OPTIMISTIC] Added message, total:", newData.messages.length);
+          return newData;
+        });
+        
+        emitSendMessage({
+          receiverId: selectedOtherUserId,
+          content: encryptedContent,
+          tempId,
+        });
+        console.log("[SEND] Via socket (E2E encrypted)");
+      } else {
+        // 4️⃣ FALLBACK: Use HTTP for files or when socket not connected
+        // 🔥 mutation.onMutate handles optimistic update - don't add here
+        sendMessageMutation.mutate({
+          receiverId: selectedOtherUserId,
+          content: encryptedContent,
+          file: selectedFile || undefined,
+        });
+        console.log("[SEND] Via HTTP (E2E encrypted)");
+      }
     }
-  }, [newMessage, selectedFile, selectedOtherUserId, sendMessageMutation]);
+  }, [newMessage, selectedFile, selectedOtherUserId, isConnected, currentUser, emitSendMessage, sendMessageMutation, queryClient, encryptForSend]);
+
+  // 🚀 Auto-scroll to bottom when messages change
+  useEffect(() => {
+    if (messages.length > 0 && messagesEndRef.current) {
+      // Small delay to ensure render is complete
+      setTimeout(() => {
+        messagesEndRef.current?.scrollToEnd({ animated: true });
+      }, 100);
+    }
+  }, [messages.length]);
 
   const pickImage = async () => {
     const result = await ImagePicker.launchImageLibraryAsync({
@@ -291,6 +825,53 @@ const MessagesScreen = () => {
     setSelectedFile(null);
   };
 
+  // 🎬 VIDEO PICKER
+  const pickVideo = async () => {
+    try {
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ImagePicker.MediaTypeOptions.Videos,
+        allowsEditing: true,
+        quality: 0.8,
+        videoMaxDuration: 60, // Max 60 seconds
+      });
+
+      if (!result.canceled && result.assets[0]) {
+        const asset = result.assets[0];
+        const fileName = asset.uri.split("/").pop() || "video.mp4";
+        setSelectedFile({
+          uri: asset.uri,
+          type: "video/mp4",
+          name: fileName,
+        });
+      }
+    } catch (error) {
+      console.error("Error picking video:", error);
+      Alert.alert("Lỗi", "Không thể chọn video. Vui lòng thử lại.");
+    }
+  };
+
+  // 🎨 SEND STICKER
+  const sendSticker = useCallback(
+    (packId: string, sticker: Sticker) => {
+      if (!selectedOtherUserId || !currentUser) return;
+
+      // Send to server - mutation handles optimistic update
+      const encryptedContent = encryptForSend(sticker.emoji);
+      sendMessageMutation.mutate(
+        {
+          receiverId: selectedOtherUserId,
+          content: encryptedContent,
+        },
+        {
+          onSuccess: () => {
+            setIsStickerPickerOpen(false);
+          },
+        }
+      );
+    },
+    [selectedOtherUserId, currentUser, sendMessageMutation, encryptForSend]
+  );
+
   // ✅ BẮT ĐẦU CUỘC HỘI THOẠI MỚI TỪ MODAL
   const handleStartNewConversation = (friendId: string) => {
     if (!friendId) {
@@ -324,36 +905,129 @@ const MessagesScreen = () => {
     setImageViewerVisible(true);
   };
 
-  // ✅ TẢI FILE (Ảnh hoặc Tài liệu) - Expo Go compatible with Share sheet
+  // ✅ TẢI FILE (Ảnh hoặc Tài liệu)
+  // Android: Sử dụng SAF để chọn thư mục lưu
+  // iOS: Mở share sheet
   const handleDownload = async (
     url: string,
     fileName: string,
     isImage: boolean
   ) => {
-    try {
-      // Download file to cache
-      const fileUri = (FileSystem as any).cacheDirectory + fileName;
-      const downloadResult = await FileSystem.downloadAsync(url, fileUri);
+    // Tránh duplicate requests
+    if (isSharing) {
+      return;
+    }
 
-      if (downloadResult.status === 200) {
-        // Check if sharing is available
-        const Sharing = await import("expo-sharing");
-        const isAvailable = await Sharing.isAvailableAsync();
-        
-        if (isAvailable) {
-          await Sharing.shareAsync(downloadResult.uri, {
-            mimeType: isImage ? "image/jpeg" : "application/octet-stream",
-            dialogTitle: isImage ? "Lưu ảnh" : "Lưu tài liệu",
-          });
-        } else {
-          Alert.alert("Lỗi", "Không thể chia sẻ file trên thiết bị này.");
+    try {
+      setIsSharing(true);
+      
+      // Download file to cache first
+      const cacheUri = (FileSystem as any).cacheDirectory + fileName;
+      const downloadResult = await FileSystem.downloadAsync(url, cacheUri);
+
+      if (downloadResult.status !== 200) {
+        Alert.alert("Lỗi", "Không thể tải file. Vui lòng thử lại.");
+        return;
+      }
+
+      if (Platform.OS === 'android') {
+        // 🤖 ANDROID: Sử dụng SAF để chọn thư mục lưu (cho cả ảnh và tài liệu)
+        try {
+          // Yêu cầu người dùng chọn thư mục
+          const permissions = await FileSystem.StorageAccessFramework.requestDirectoryPermissionsAsync();
+          
+          if (permissions.granted) {
+            // Đọc file từ cache
+            const fileContent = await FileSystem.readAsStringAsync(downloadResult.uri, {
+              encoding: FileSystem.EncodingType.Base64,
+            });
+            
+            // Xác định MIME type
+            const ext = fileName.split('.').pop()?.toLowerCase() || '';
+            let mimeType = "application/octet-stream";
+            
+            // Images
+            if (['jpg', 'jpeg'].includes(ext)) mimeType = "image/jpeg";
+            else if (ext === 'png') mimeType = "image/png";
+            else if (ext === 'gif') mimeType = "image/gif";
+            else if (ext === 'webp') mimeType = "image/webp";
+            // Documents
+            else if (ext === 'pdf') mimeType = "application/pdf";
+            else if (['doc', 'docx'].includes(ext)) mimeType = "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
+            else if (['xls', 'xlsx'].includes(ext)) mimeType = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
+            else if (['ppt', 'pptx'].includes(ext)) mimeType = "application/vnd.openxmlformats-officedocument.presentationml.presentation";
+            else if (ext === 'txt') mimeType = "text/plain";
+            else if (ext === 'zip') mimeType = "application/zip";
+            // Video
+            else if (['mp4', 'mov', 'avi'].includes(ext)) mimeType = "video/mp4";
+
+            // Tạo file trong thư mục người dùng chọn
+            const newFileUri = await FileSystem.StorageAccessFramework.createFileAsync(
+              permissions.directoryUri,
+              fileName,
+              mimeType
+            );
+
+            // Ghi nội dung vào file
+            await FileSystem.writeAsStringAsync(newFileUri, fileContent, {
+              encoding: FileSystem.EncodingType.Base64,
+            });
+
+            Alert.alert("✅ Thành công", `${isImage ? '📷 Ảnh' : '📄 Tệp'} "${fileName}" đã được lưu!`);
+          } else {
+            Alert.alert("Thông báo", "Bạn cần chọn thư mục để lưu file.");
+          }
+        } catch (safError: any) {
+          console.error("SAF error:", safError);
+          Alert.alert("Lỗi", "Không thể lưu file. Vui lòng thử lại.");
         }
       } else {
-        throw new Error("Download failed");
+        // 🍎 iOS: Mở share sheet
+        const Sharing = await import("expo-sharing");
+        if (await Sharing.isAvailableAsync()) {
+          await Sharing.shareAsync(downloadResult.uri, {
+            mimeType: isImage ? "image/jpeg" : "application/octet-stream",
+            dialogTitle: isImage ? "Lưu ảnh" : `Lưu ${fileName}`,
+            UTI: isImage ? 'public.image' : 'public.data',
+          });
+        }
       }
     } catch (error: any) {
       console.error("Download error:", error);
       Alert.alert("Lỗi", "Không thể tải file. Vui lòng thử lại.");
+    } finally {
+      setIsSharing(false);
+    }
+  };
+
+  // ✅ CHỤP ẢNH BẰNG CAMERA
+  const takePhoto = async () => {
+    try {
+      // Request camera permissions
+      const { status } = await ImagePicker.requestCameraPermissionsAsync();
+      if (status !== "granted") {
+        Alert.alert("Quyền truy cập", "Cần cấp quyền truy cập camera để chụp ảnh.");
+        return;
+      }
+
+      const result = await ImagePicker.launchCameraAsync({
+        mediaTypes: ImagePicker.MediaTypeOptions.Images,
+        allowsEditing: true,
+        quality: 0.8,
+      });
+
+      if (!result.canceled && result.assets[0]) {
+        const asset = result.assets[0];
+        const fileName = `photo_${Date.now()}.jpg`;
+        setSelectedFile({
+          uri: asset.uri,
+          type: "image/jpeg",
+          name: fileName,
+        });
+      }
+    } catch (error) {
+      console.error("Camera error:", error);
+      Alert.alert("Lỗi", "Không thể mở camera. Vui lòng thử lại.");
     }
   };
 
@@ -468,8 +1142,8 @@ const MessagesScreen = () => {
                       }}
                       className="w-16 h-16 rounded-full"
                     />
-                    {/* Dấu chấm xanh nhỏ nếu đã có conversation */}
-                    {hasConversation && (
+                    {/* 🟢 Chấm xanh chỉ hiện khi bạn bè ONLINE thật sự */}
+                    {friend.clerkId && isUserOnline(friend.clerkId) && (
                       <View className="absolute -bottom-1 -right-1 w-4 h-4 bg-green-500 rounded-full border-2 border-white" />
                     )}
                   </View>
@@ -519,6 +1193,8 @@ const MessagesScreen = () => {
                 elevation: 1,
               }}
               onPress={() => openConversation(conversation.user._id)}
+              onLongPress={() => handleConversationLongPress(conversation)}
+              delayLongPress={500}
               activeOpacity={0.7}
             >
               <View className="relative">
@@ -530,7 +1206,10 @@ const MessagesScreen = () => {
                   }}
                   className="w-14 h-14 rounded-full"
                 />
-                <View className="absolute bottom-0 right-0 w-4 h-4 bg-green-400 rounded-full border-2 border-white" />
+                {/* 🟢 Online indicator - Real-time status */}
+                {conversation.user.clerkId && isUserOnline(conversation.user.clerkId) && (
+                  <View className="absolute bottom-0 right-0 w-4 h-4 bg-green-500 rounded-full border-2 border-white" />
+                )}
               </View>
 
               <View className="flex-1 ml-3">
@@ -546,7 +1225,7 @@ const MessagesScreen = () => {
                   className={`text-sm ${!conversation.isRead ? "font-semibold text-gray-900" : "text-gray-500"}`}
                   numberOfLines={1}
                 >
-                  {conversation.lastMessage || "Bắt đầu trò chuyện"}
+                  {conversation.lastMessage ? decryptForList(conversation.lastMessage, currentUser?._id, conversation.user._id) : "Bắt đầu trò chuyện"}
                 </Text>
               </View>
               
@@ -578,22 +1257,44 @@ const MessagesScreen = () => {
                 <Feather name="arrow-left" size={24} color="#0084ff" />
               </TouchableOpacity>
               
-              <View className="relative">
-                <Image
-                  source={{
-                    uri: otherUser.profilePicture || "https://placehold.co/100x100?text=User",
-                  }}
-                  className="w-11 h-11 rounded-full"
-                />
-                <View className="absolute bottom-0 right-0 w-3.5 h-3.5 bg-green-400 rounded-full border-2 border-white" />
-              </View>
-              
-              <View className="flex-1 ml-3">
-                <Text className="font-bold text-gray-900 text-base">
-                  {otherUser.firstName} {otherUser.lastName}
-                </Text>
-                <Text className="text-green-500 text-xs font-medium">Đang hoạt động</Text>
-              </View>
+              {/* 🔗 Profile Navigation - Tap avatar or name to go to profile */}
+              <TouchableOpacity 
+                onPress={() => {
+                  closeChatModal();
+                  router.push(`/user/${otherUser._id}`);
+                }}
+                className="flex-row items-center flex-1"
+                activeOpacity={0.7}
+              >
+                <View className="relative">
+                  <Image
+                    source={{
+                      uri: otherUser.profilePicture || "https://placehold.co/100x100?text=User",
+                    }}
+                    className="w-11 h-11 rounded-full"
+                  />
+                  {/* 🟢 Real-time online indicator */}
+                  {otherUser.clerkId && isUserOnline(otherUser.clerkId) && (
+                    <View className="absolute bottom-0 right-0 w-3.5 h-3.5 bg-green-500 rounded-full border-2 border-white" />
+                  )}
+                </View>
+                
+                <View className="flex-1 ml-3">
+                  <Text className="font-bold text-gray-900 text-base">
+                    {otherUser.firstName} {otherUser.lastName}
+                  </Text>
+                  {/* 🟢 Real-time online status text */}
+                  {otherUser.clerkId && isUserOnline(otherUser.clerkId) ? (
+                    <Text className="text-green-500 text-xs font-medium">Đang hoạt động</Text>
+                  ) : otherUser.lastSeen ? (
+                    <Text className="text-gray-400 text-xs">
+                      Hoạt động {formatLastSeen(otherUser.lastSeen)}
+                    </Text>
+                  ) : (
+                    <Text className="text-gray-400 text-xs">Không hoạt động</Text>
+                  )}
+                </View>
+              </TouchableOpacity>
               
               {/* Call Buttons */}
               <TouchableOpacity 
@@ -652,14 +1353,20 @@ const MessagesScreen = () => {
                       {otherUser.firstName} {otherUser.lastName}
                     </Text>
                   ) : (
-                    messages.map((message: Message) => {
+                    messages.map((message: Message, index: number) => {
                       const isFromCurrentUser =
                         message.sender._id === currentUser?._id;
                       
-                      // Decrypt message content
-                      // We can assume messages are encrypted if key features are active
-                      // The decrypt function handles plain text fallback automatically
-                      const decryptedContent = decryptMessage(message.content);
+                      // Messages are pre-decrypted in useMemo, use content directly
+                      const decryptedContent = message.content;
+                      
+                      // Check if this is the last message sent by current user and is read
+                      // Find the index of the last message sent by current user
+                      const lastSentIndex = messages.reduce((last: number, m: Message, i: number) => 
+                        m.sender._id === currentUser?._id ? i : last, -1
+                      );
+                      const isLastSentMessage = isFromCurrentUser && index === lastSentIndex;
+                      const showSeenIndicator = isLastSentMessage && message.isRead;
 
                       return (
                         <View
@@ -679,23 +1386,27 @@ const MessagesScreen = () => {
                             />
                           )}
                           <View
-                            className={`flex-1 ${
-                              isFromCurrentUser ? "items-end" : ""
+                            className={`${
+                              isFromCurrentUser ? "items-end" : "items-start"
                             }`}
                           >
+                            {/* 🔥 Long-press for edit/delete (only own messages) */}
+                            <TouchableOpacity
+                              onLongPress={() => handleMessageLongPress(message)}
+                              delayLongPress={500}
+                              activeOpacity={0.8}
+                            >
                             <View
                               className={`rounded-2xl px-4 py-3 max-w-xs ${
                                 isFromCurrentUser
-                                  ? "bg-blue-500"
-                                  : "bg-gray-100"
+                                  ? message.isDeleted ? "bg-gray-400" : "bg-blue-500"
+                                  : message.isDeleted ? "bg-gray-200" : "bg-gray-100"
                               }`}
                             >
                               {/* Display attachment if present */}
                               {message.attachment?.url && (
                                 <View className="mb-2">
-                                  {message.attachment.type.startsWith(
-                                    "image"
-                                  ) ? (
+                                  {(message.attachment.type === "image" || message.attachment.type?.startsWith("image/")) ? (
                                     <TouchableOpacity
                                       onPress={() =>
                                         handleViewImage(message.attachment!.url)
@@ -707,50 +1418,147 @@ const MessagesScreen = () => {
                                         resizeMode="cover"
                                       />
                                     </TouchableOpacity>
-                                  ) : (
-                                    <TouchableOpacity
-                                      className="flex-row items-center p-3 rounded-lg border-2 border-dashed border-gray-300"
-                                      onPress={() =>
-                                        handleOpenDocument(message.attachment!.url)
-                                      }
-                                    >
-                                      <Feather
-                                        name="file"
-                                        size={20}
-                                        color={
-                                          isFromCurrentUser ? "white" : "#333"
+                                  ) : (() => {
+                                    const fileInfo = getFileTypeInfo(
+                                      message.attachment!.fileName || '',
+                                      message.attachment!.type
+                                    );
+                                    return (
+                                      <TouchableOpacity
+                                        className="flex-row items-center p-3 rounded-xl bg-white border border-gray-200"
+                                        style={{ minWidth: 200 }}
+                                        onPress={() =>
+                                          handleOpenDocument(message.attachment!.url)
                                         }
-                                      />
-                                      <Text
-                                        className={`ml-2 flex-1 ${
-                                          isFromCurrentUser
-                                            ? "text-white"
-                                            : "text-gray-900"
-                                        }`}
-                                        numberOfLines={1}
                                       >
-                                        {message.attachment.fileName ||
-                                          "Document"}
-                                      </Text>
-                                    </TouchableOpacity>
-                                  )}
+                                        {/* File Type Icon */}
+                                        <View 
+                                          className="w-12 h-12 rounded-xl items-center justify-center mr-3"
+                                          style={{ backgroundColor: fileInfo.color + '15' }}
+                                        >
+                                          <Feather
+                                            name={fileInfo.icon as any}
+                                            size={24}
+                                            color={fileInfo.color}
+                                          />
+                                        </View>
+                                        
+                                        {/* File Info */}
+                                        <View className="flex-1">
+                                          <Text
+                                            className="text-sm font-semibold text-gray-800"
+                                            numberOfLines={1}
+                                          >
+                                            {message.attachment!.fileName || "Tệp đính kèm"}
+                                          </Text>
+                                          <Text
+                                            className="text-xs text-gray-500"
+                                          >
+                                            {fileInfo.label}
+                                          </Text>
+                                        </View>
+                                        
+                                        {/* Download Button */}
+                                        <TouchableOpacity
+                                          onPress={() =>
+                                            handleDownload(
+                                              message.attachment!.url,
+                                              message.attachment!.fileName || "document",
+                                              false
+                                            )
+                                          }
+                                          className="w-10 h-10 rounded-full bg-blue-50 items-center justify-center ml-2"
+                                        >
+                                          <Feather
+                                            name="download"
+                                            size={18}
+                                            color="#3B82F6"
+                                          />
+                                        </TouchableOpacity>
+                                      </TouchableOpacity>
+                                    );
+                                  })()}
                                 </View>
                               )}
                               {message.content ? (
-                            <Text
-                              className={`${
-                                isFromCurrentUser
-                                  ? "text-white"
-                                  : "text-gray-900"
-                              } text-base`}
-                            >
-                              {decryptedContent}
-                            </Text>
+                            (() => {
+                              // 🔗 Parse and render clickable links in message
+                              const linkRegex = /\[([^\]]+)\]\(\/post\/([^)]+)\)/g;
+                              const parts = [];
+                              let lastIndex = 0;
+                              let match;
+                              
+                              while ((match = linkRegex.exec(decryptedContent)) !== null) {
+                                // Add text before link
+                                if (match.index > lastIndex) {
+                                  parts.push(
+                                    <Text key={`text-${lastIndex}`} className={`${isFromCurrentUser ? "text-white" : "text-gray-900"} text-base`}>
+                                      {decryptedContent.slice(lastIndex, match.index)}
+                                    </Text>
+                                  );
+                                }
+                                // Add clickable link
+                                const linkText = match[1];
+                                const postId = match[2];
+                                parts.push(
+                                  <TouchableOpacity 
+                                    key={`link-${match.index}`}
+                                    onPress={() => {
+                                      closeChatModal();
+                                      router.push(`/post/${postId}`);
+                                    }}
+                                  >
+                                    <Text className={`${isFromCurrentUser ? "text-blue-200 underline" : "text-blue-500 underline"} text-base font-medium`}>
+                                      {linkText}
+                                    </Text>
+                                  </TouchableOpacity>
+                                );
+                                lastIndex = match.index + match[0].length;
+                              }
+                              
+                              // Add remaining text
+                              if (lastIndex < decryptedContent.length) {
+                                parts.push(
+                                  <Text key={`text-end`} className={`${isFromCurrentUser ? "text-white" : "text-gray-900"} text-base`}>
+                                    {decryptedContent.slice(lastIndex)}
+                                  </Text>
+                                );
+                              }
+                              
+                              // If no links found, just render plain text
+                              if (parts.length === 0) {
+                                return (
+                                  <Text className={`${isFromCurrentUser ? "text-white" : "text-gray-900"} text-base`}>
+                                    {decryptedContent}
+                                  </Text>
+                                );
+                              }
+                              
+                              return <View style={{ flexDirection: 'row', flexWrap: 'wrap' }}>{parts}</View>;
+                            })()
                           ) : null}
                             </View>
-                            <Text className="text-xs text-gray-400 mt-1">
-                              {formatDate(message.createdAt)}
-                            </Text>
+                            </TouchableOpacity>
+                            <View className="flex-row items-center mt-1">
+                              <Text className="text-xs text-gray-400">
+                                {formatDate(message.createdAt)}
+                              </Text>
+                              {/* ✏️ Edited indicator */}
+                              {message.isEdited && (
+                                <Text className="text-xs text-gray-400 ml-1">(đã sửa)</Text>
+                              )}
+                              {/* 👁️ Seen indicator - shows for last sent message that was read */}
+                              {showSeenIndicator && (
+                                <View className="flex-row items-center ml-2">
+                                  <Image
+                                    source={{
+                                      uri: otherUser?.profilePicture || "https://placehold.co/100x100?text=User",
+                                    }}
+                                    className="w-4 h-4 rounded-full"
+                                  />
+                                </View>
+                              )}
+                            </View>
                           </View>
                         </View>
                       );
@@ -796,24 +1604,35 @@ const MessagesScreen = () => {
               </View>
             )}
 
-            {/* Message Input - Messenger Style */}
+            {/* Message Input - Messenger Style Enhanced */}
             <View className="flex-row items-end px-3 py-2 bg-white border-t border-gray-100">
-              {/* Quick action buttons */}
+              {/* Quick action buttons row */}
               <View className="flex-row items-center pb-2">
+                {/* Camera */}
                 <TouchableOpacity
-                  onPress={() => Alert.alert("Camera", "Mở camera...")}
+                  onPress={takePhoto}
                   className="w-9 h-9 bg-blue-500 rounded-full items-center justify-center mr-1"
                   disabled={sendMessageMutation.isPending}
                 >
                   <Ionicons name="camera" size={18} color="white" />
                 </TouchableOpacity>
+                {/* Image */}
                 <TouchableOpacity
                   onPress={pickImage}
-                  className="w-9 h-9 items-center justify-center mr-1"
+                  className="w-9 h-9 items-center justify-center"
                   disabled={sendMessageMutation.isPending}
                 >
                   <Ionicons name="image" size={24} color="#0084ff" />
                 </TouchableOpacity>
+                {/* Video */}
+                <TouchableOpacity
+                  onPress={pickVideo}
+                  className="w-9 h-9 items-center justify-center"
+                  disabled={sendMessageMutation.isPending}
+                >
+                  <Ionicons name="videocam" size={24} color="#0084ff" />
+                </TouchableOpacity>
+                {/* 📎 Document (PDF, Word) */}
                 <TouchableOpacity
                   onPress={pickDocument}
                   className="w-9 h-9 items-center justify-center"
@@ -821,10 +1640,18 @@ const MessagesScreen = () => {
                 >
                   <Ionicons name="document-attach" size={22} color="#0084ff" />
                 </TouchableOpacity>
+                {/* Sticker */}
+                <TouchableOpacity
+                  onPress={() => setIsStickerPickerOpen(true)}
+                  className="w-9 h-9 items-center justify-center"
+                  disabled={sendMessageMutation.isPending}
+                >
+                  <Text style={{ fontSize: 22 }}>😊</Text>
+                </TouchableOpacity>
               </View>
 
-              {/* Text Input with emoji */}
-              <View className="flex-1 flex-row items-end bg-gray-100 rounded-3xl px-3 py-2 mx-2">
+              {/* Text Input */}
+              <View className="flex-1 flex-row items-end bg-gray-100 rounded-3xl px-4 py-2 mx-2">
                 <TextInput
                   className="flex-1 text-base max-h-24 py-1"
                   placeholder="Aa"
@@ -833,12 +1660,6 @@ const MessagesScreen = () => {
                   onChangeText={setNewMessage}
                   multiline
                 />
-                <TouchableOpacity 
-                  className="ml-2 pb-1"
-                  onPress={() => Alert.alert("Emoji", "Emoji picker sẽ mở ra...")}
-                >
-                  <Ionicons name="happy-outline" size={24} color="#0084ff" />
-                </TouchableOpacity>
               </View>
 
               {/* Send or Like button */}
@@ -847,6 +1668,12 @@ const MessagesScreen = () => {
                   onPress={sendMessage}
                   disabled={sendMessageMutation.isPending}
                   className="w-10 h-10 bg-blue-500 rounded-full items-center justify-center mb-0.5"
+                  style={{
+                    shadowColor: "#0084ff",
+                    shadowOffset: { width: 0, height: 2 },
+                    shadowOpacity: 0.3,
+                    shadowRadius: 4,
+                  }}
                 >
                   {sendMessageMutation.isPending ? (
                     <ActivityIndicator size="small" color="white" />
@@ -866,6 +1693,8 @@ const MessagesScreen = () => {
                 </TouchableOpacity>
               )}
             </View>
+
+            {/* Connection Status */}
             {!isConnected && (
               <View className="px-4 py-2 bg-yellow-50">
                 <Text className="text-yellow-800 text-xs text-center">
@@ -873,6 +1702,13 @@ const MessagesScreen = () => {
                 </Text>
               </View>
             )}
+
+            {/* 🎨 Sticker Picker Modal */}
+            <StickerPicker
+              visible={isStickerPickerOpen}
+              onClose={() => setIsStickerPickerOpen(false)}
+              onSelectSticker={sendSticker}
+            />
           </SafeAreaView>
         )}
       </Modal>
@@ -1064,8 +1900,59 @@ const MessagesScreen = () => {
           />
         );
       })()}
+
+      {/* ✏️ Edit Message Modal */}
+      <Modal
+        visible={isEditModalOpen}
+        animationType="slide"
+        transparent
+        onRequestClose={() => {
+          setIsEditModalOpen(false);
+          setSelectedMessage(null);
+          setEditMessageText("");
+        }}
+      >
+        <View className="flex-1 bg-black/50 justify-center px-4">
+          <View className="bg-white rounded-2xl p-4">
+            <Text className="text-lg font-bold text-gray-800 mb-3">
+              ✏️ Chỉnh sửa tin nhắn
+            </Text>
+            <TextInput
+              value={editMessageText}
+              onChangeText={setEditMessageText}
+              multiline
+              className="border border-gray-200 rounded-xl p-3 text-gray-800 min-h-[100px]"
+              placeholder="Nhập nội dung mới..."
+              placeholderTextColor="#9ca3af"
+              autoFocus
+            />
+            <View className="flex-row justify-end mt-4 gap-2">
+              <TouchableOpacity
+                onPress={() => {
+                  setIsEditModalOpen(false);
+                  setSelectedMessage(null);
+                  setEditMessageText("");
+                }}
+                className="px-4 py-2 rounded-full bg-gray-100"
+              >
+                <Text className="text-gray-600 font-medium">Hủy</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                onPress={handleSubmitEdit}
+                disabled={!editMessageText.trim() || editMessageMutation.isPending}
+                className={`px-4 py-2 rounded-full ${editMessageText.trim() ? "bg-blue-500" : "bg-gray-200"}`}
+              >
+                <Text className={`font-medium ${editMessageText.trim() ? "text-white" : "text-gray-400"}`}>
+                  {editMessageMutation.isPending ? "Đang lưu..." : "Lưu"}
+                </Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
     </SafeAreaView>
   );
 };
 
 export default MessagesScreen;
+

@@ -64,6 +64,11 @@ const userSchema = new mongoose.Schema(
       type: String,
       default: "",
     },
+    // 🟢 Online status tracking
+    lastSeen: {
+      type: Date,
+      default: Date.now,
+    },
   },
   { timestamps: true }
 );

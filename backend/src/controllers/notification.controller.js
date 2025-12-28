@@ -1,13 +1,10 @@
 import asyncHandler from "express-async-handler";
-import { getAuth } from "@clerk/express";
 import Notification from "../models/notification.model.js";
-import User from "../models/user.model.js";
 
 export const getNotifications = asyncHandler(async (req, res) => {
-  const { userId } = getAuth(req);
-
-  const user = await User.findOne({ clerkId: userId });
-  if (!user) return res.status(404).json({ error: "User not found" });
+  // Use req.user from protectRoute middleware
+  const user = req.user;
+  if (!user) return res.status(401).json({ error: "User not authenticated" });
 
   const notifications = await Notification.find({ to: user._id })
     .sort({ createdAt: -1 })
@@ -19,11 +16,10 @@ export const getNotifications = asyncHandler(async (req, res) => {
 });
 
 export const deleteNotification = asyncHandler(async (req, res) => {
-  const { userId } = getAuth(req);
+  const user = req.user;
   const { notificationId } = req.params;
 
-  const user = await User.findOne({ clerkId: userId });
-  if (!user) return res.status(404).json({ error: "User not found" });
+  if (!user) return res.status(401).json({ error: "User not authenticated" });
 
   const notification = await Notification.findOneAndDelete({
     _id: notificationId,
@@ -39,11 +35,15 @@ export const deleteNotification = asyncHandler(async (req, res) => {
 // ✅ Đánh dấu đã đọc thông báo
 // ==============================
 export const markAsRead = asyncHandler(async (req, res) => {
-  const { userId } = getAuth(req);
+  const user = req.user;
   const { notificationId } = req.params;
 
-  const user = await User.findOne({ clerkId: userId });
-  if (!user) return res.status(404).json({ error: "User not found" });
+  console.log("[NOTIFICATION] markAsRead:", { notificationId, userId: user?._id });
+
+  if (!user) {
+    console.log("[NOTIFICATION] Error: User not authenticated");
+    return res.status(401).json({ error: "User not authenticated" });
+  }
 
   const notification = await Notification.findOneAndUpdate(
     { _id: notificationId, to: user._id },
@@ -51,7 +51,11 @@ export const markAsRead = asyncHandler(async (req, res) => {
     { new: true }
   );
 
-  if (!notification) return res.status(404).json({ error: "Notification not found" });
+  if (!notification) {
+    console.log("[NOTIFICATION] Error: Notification not found");
+    return res.status(404).json({ error: "Notification not found" });
+  }
 
+  console.log("[NOTIFICATION] Marked as read:", notification._id);
   res.status(200).json({ notification });
 });

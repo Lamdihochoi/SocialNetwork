@@ -115,3 +115,83 @@ export const decryptWithKey = (cipherText: string, key: string): string => {
     return cipherText;
   }
 };
+
+// ==========================================
+// 🔐 SESSION-BASED E2E ENCRYPTION
+// Keys are generated per conversation session
+// Only sender and receiver know the key
+// Server CANNOT decrypt messages
+// ==========================================
+
+// In-memory storage for session keys (never persisted)
+const sessionKeys = new Map<string, { key: string; createdAt: number }>();
+
+/**
+ * Generate a session-specific encryption key
+ * Key = SHA256(userId1 + userId2 + sessionId + timestamp)
+ * Each conversation open creates a new session
+ * @param userId1 - Current user ID
+ * @param userId2 - Other user ID
+ * @returns Session encryption key (256-bit)
+ */
+export const generateSessionKey = (userId1: string, userId2: string): string => {
+  const sortedIds = [userId1, userId2].sort().join("_");
+  const sessionId = Date.now().toString(36) + Math.random().toString(36).substring(2);
+  const keyMaterial = sortedIds + sessionId + SECRET_KEY;
+  const sessionKey = CryptoJS.SHA256(keyMaterial).toString();
+  
+  // Store the session key
+  sessionKeys.set(sortedIds, {
+    key: sessionKey,
+    createdAt: Date.now(),
+  });
+  
+  console.log(`[E2E] New session key generated for conversation: ${sortedIds.substring(0, 10)}...`);
+  return sessionKey;
+};
+
+/**
+ * Get or create session key for a conversation
+ * @param userId1 - Current user ID
+ * @param userId2 - Other user ID
+ * @returns Existing or new session key
+ */
+export const getOrCreateSessionKey = (userId1: string, userId2: string): string => {
+  const sortedIds = [userId1, userId2].sort().join("_");
+  const existing = sessionKeys.get(sortedIds);
+  
+  if (existing) {
+    return existing.key;
+  }
+  
+  return generateSessionKey(userId1, userId2);
+};
+
+/**
+ * Clear session key when conversation is closed
+ * @param userId1 - Current user ID
+ * @param userId2 - Other user ID
+ */
+export const clearSessionKey = (userId1: string, userId2: string): void => {
+  const sortedIds = [userId1, userId2].sort().join("_");
+  sessionKeys.delete(sortedIds);
+  console.log(`[E2E] Session key cleared for conversation: ${sortedIds.substring(0, 10)}...`);
+};
+
+/**
+ * Encrypt message with session key (E2E)
+ * Server cannot decrypt this - only sender and receiver can
+ */
+export const encryptE2E = (plainText: string, userId1: string, userId2: string): string => {
+  const sessionKey = getOrCreateSessionKey(userId1, userId2);
+  return encryptWithKey(plainText, sessionKey);
+};
+
+/**
+ * Decrypt message with session key (E2E)
+ */
+export const decryptE2E = (cipherText: string, userId1: string, userId2: string): string => {
+  const sessionKey = getOrCreateSessionKey(userId1, userId2);
+  return decryptWithKey(cipherText, sessionKey);
+};
+

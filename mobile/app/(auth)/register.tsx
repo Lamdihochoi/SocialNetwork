@@ -27,13 +27,13 @@ export default function Register() {
   // Validate inputs
   const validateInputs = () => {
     if (!emailAddress || !password) {
-      Alert.alert("Error", "Please fill in all fields");
+      Alert.alert("Lỗi", "Vui lòng điền đầy đủ thông tin");
       return false;
     }
     // Basic regex for email
     const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
     if (!emailRegex.test(emailAddress)) {
-      Alert.alert("Error", "Please enter a valid email address");
+      Alert.alert("Lỗi", "Vui lòng nhập địa chỉ email hợp lệ");
       return false;
     }
     return true;
@@ -58,7 +58,7 @@ export default function Register() {
     } catch (err: any) {
       setIsLoading(false);
       console.error("Sign up error:", err);
-      Alert.alert("Error", err.errors ? err.errors[0].message : err.message);
+      Alert.alert("Lỗi", err.errors ? err.errors[0].message : err.message);
     }
   };
 
@@ -77,13 +77,13 @@ export default function Register() {
         // Router handles navigation
       } else {
         console.error("Verification status:", completeSignUp.status);
-        Alert.alert("Error", "Verification incomplete. Status: " + completeSignUp.status);
+        Alert.alert("Lỗi", "Xác thực chưa hoàn tất. Trạng thái: " + completeSignUp.status);
         setIsLoading(false);
       }
     } catch (err: any) {
       setIsLoading(false);
       console.error("Verification error:", err);
-      Alert.alert("Error", err.errors ? err.errors[0].message : err.message);
+      Alert.alert("Lỗi", err.errors ? err.errors[0].message : err.message);
     }
   };
 
@@ -95,12 +95,12 @@ export default function Register() {
       >
         <View className="mb-8">
           <Text className="text-3xl font-bold text-black mb-2">
-            {pendingVerification ? "Verify Email" : "Create Account"}
+            {pendingVerification ? "Xác thực Email" : "Tạo tài khoản"}
           </Text>
           <Text className="text-gray-500">
             {pendingVerification
-              ? "Enter the code sent to your email"
-              : "Sign up to get started"}
+              ? "Nhập mã xác thực đã gửi đến email của bạn"
+              : "Đăng ký để bắt đầu"}
           </Text>
         </View>
 
@@ -111,17 +111,17 @@ export default function Register() {
               <TextInput
                 autoCapitalize="none"
                 value={emailAddress}
-                placeholder="Enter your email"
+                placeholder="Nhập email của bạn"
                 onChangeText={setEmailAddress}
                 className="w-full bg-gray-50 border border-gray-300 rounded-xl px-4 py-3 text-base"
               />
             </View>
 
             <View>
-              <Text className="mb-1 text-gray-700 font-medium">Password</Text>
+              <Text className="mb-1 text-gray-700 font-medium">Mật khẩu</Text>
               <TextInput
                 value={password}
-                placeholder="Enter your password"
+                placeholder="Nhập mật khẩu của bạn"
                 secureTextEntry={true}
                 onChangeText={setPassword}
                 className="w-full bg-gray-50 border border-gray-300 rounded-xl px-4 py-3 text-base"
@@ -136,15 +136,15 @@ export default function Register() {
               {isLoading ? (
                 <ActivityIndicator color="#fff" />
               ) : (
-                <Text className="text-white font-bold text-lg">Sign Up</Text>
+                <Text className="text-white font-bold text-lg">Đăng ký</Text>
               )}
             </TouchableOpacity>
 
             <View className="flex-row justify-center mt-4">
-              <Text className="text-gray-500">Already have an account? </Text>
+              <Text className="text-gray-500">Đã có tài khoản? </Text>
               <Link href="/(auth)/login" asChild>
                 <TouchableOpacity>
-                   <Text className="text-blue-500 font-medium">Login</Text>
+                   <Text className="text-blue-500 font-medium">Đăng nhập</Text>
                 </TouchableOpacity>
               </Link>
             </View>
@@ -152,7 +152,7 @@ export default function Register() {
             <View className="flex-row justify-center mt-2">
                <Link href="/(auth)" asChild>
                   <TouchableOpacity>
-                     <Text className="text-gray-500">Go back</Text>
+                     <Text className="text-gray-500">Quay lại</Text>
                   </TouchableOpacity>
                </Link>
             </View>
@@ -162,7 +162,7 @@ export default function Register() {
         {pendingVerification && (
           <View className="gap-4">
             <View>
-              <Text className="mb-1 text-gray-700 font-medium">Verification Code</Text>
+              <Text className="mb-1 text-gray-700 font-medium">Mã xác thực</Text>
               <TextInput
                 value={code}
                 placeholder="123456"
@@ -180,7 +180,7 @@ export default function Register() {
               {isLoading ? (
                 <ActivityIndicator color="#fff" />
               ) : (
-                <Text className="text-white font-bold text-lg">Verify Email</Text>
+                <Text className="text-white font-bold text-lg">Xác thực Email</Text>
               )}
             </TouchableOpacity>
              
@@ -188,7 +188,7 @@ export default function Register() {
                onPress={() => setPendingVerification(false)}
                className="items-center mt-4"
             >
-               <Text className="text-blue-500 font-medium">Back to Sign Up</Text>
+               <Text className="text-blue-500 font-medium">Quay lại Đăng ký</Text>
             </TouchableOpacity>
           </View>
         )}

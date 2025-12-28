@@ -1,8 +1,6 @@
 import asyncHandler from "express-async-handler";
-import { getAuth } from "@clerk/express";
 import Comment from "../models/comment.model.js";
 import Post from "../models/post.model.js";
-import User from "../models/user.model.js";
 import Notification from "../models/notification.model.js";
 
 export const getComments = asyncHandler(async (req, res) => {
@@ -16,18 +14,29 @@ export const getComments = asyncHandler(async (req, res) => {
 });
 
 export const createComment = asyncHandler(async (req, res) => {
-  const { userId } = getAuth(req);
+  // Use req.user from protectRoute middleware instead of getAuth
+  const user = req.user;
   const { postId } = req.params;
   const { content } = req.body;
 
+  console.log("[COMMENT] Creating comment:", { postId, content, user: user?._id });
+
   if (!content || content.trim() === "") {
+    console.log("[COMMENT] Error: Empty content");
     return res.status(400).json({ error: "Comment content is required" });
   }
 
-  const user = await User.findOne({ clerkId: userId });
+  if (!user) {
+    console.log("[COMMENT] Error: User not authenticated");
+    return res.status(401).json({ error: "User not authenticated" });
+  }
+
   const post = await Post.findById(postId);
 
-  if (!user || !post) return res.status(404).json({ error: "User or post not found" });
+  if (!post) {
+    console.log("[COMMENT] Error: Post not found");
+    return res.status(404).json({ error: "Post not found" });
+  }
 
   const comment = await Comment.create({
     user: user._id,
@@ -42,27 +51,48 @@ export const createComment = asyncHandler(async (req, res) => {
 
   // create notification if not commenting on own post
   if (post.user.toString() !== user._id.toString()) {
-    await Notification.create({
+    const notification = await Notification.create({
       from: user._id,
       to: post.user,
       type: "comment",
       post: postId,
       comment: comment._id,
     });
+
+    // ⚡ REALTIME: Emit notification to post owner
+    if (req.io) {
+      const populatedNotification = await Notification.findById(notification._id)
+        .populate("from", "username firstName lastName profilePicture")
+        .populate("post", "content image")
+        .lean();
+      req.io.to(`user_${post.user}`).emit("new_notification", populatedNotification);
+    }
+  }
+
+  // ⚡ REALTIME: Emit new comment to all clients viewing this post
+  if (req.io) {
+    const populatedComment = await Comment.findById(comment._id)
+      .populate("user", "username firstName lastName profilePicture")
+      .lean();
+    req.io.emit("new_comment", { postId, comment: populatedComment });
   }
 
   res.status(201).json({ comment });
 });
 
 export const deleteComment = asyncHandler(async (req, res) => {
-  const { userId } = getAuth(req);
+  // Use req.user from protectRoute middleware
+  const user = req.user;
   const { commentId } = req.params;
 
-  const user = await User.findOne({ clerkId: userId });
+  if (!user) {
+    return res.status(401).json({ error: "User not authenticated" });
+  }
+
   const comment = await Comment.findById(commentId);
 
-  if (!user || !comment) {
-    return res.status(404).json({ error: "User or comment not found" });
+  if (!comment) {
+    return res.status(404).json({ error: "Comment not found" });
   }
 
   if (comment.user.toString() !== user._id.toString()) {

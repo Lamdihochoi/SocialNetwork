@@ -93,48 +93,9 @@ export default function CompleteProfile() {
 
     try {
       // ========================================
-      // STEP 1: Update Clerk user + set onboardingComplete
+      // STEP 1: Biometric confirmation FIRST (before setting onboardingComplete)
       // ========================================
-      console.log("[Save] Step 1: Updating Clerk user...");
-      await user?.update({
-        firstName: fn,
-        lastName: ln,
-        unsafeMetadata: {
-          ...user.unsafeMetadata,
-          onboardingComplete: true,
-        },
-      });
-
-      // ========================================
-      // STEP 2: Reload user data to get fresh metadata
-      // ========================================
-      console.log("[Save] Step 2: Reloading user data...");
-      await user?.reload();
-
-      // ========================================
-      // STEP 3: Sync to backend
-      // ========================================
-      console.log("[Save] Step 3: Syncing to backend...");
-      const synced = await syncUserToBackend(fn, ln);
-      
-      if (!synced) {
-        // Rollback onboardingComplete if sync fails
-        console.log("[Save] Sync failed, rolling back...");
-        await user?.update({
-          unsafeMetadata: {
-            ...user.unsafeMetadata,
-            onboardingComplete: false,
-          },
-        });
-        Alert.alert("Lỗi", "Không thể đồng bộ dữ liệu. Vui lòng thử lại.");
-        setIsSaving(false);
-        return;
-      }
-
-      // ========================================
-      // STEP 4: Biometric confirmation
-      // ========================================
-      console.log("[Save] Step 4: Biometric confirmation...");
+      console.log("[Save] Step 1: Biometric confirmation...");
       const hasHardware = await LocalAuthentication.hasHardwareAsync();
       const isEnrolled = await LocalAuthentication.isEnrolledAsync();
 
@@ -142,6 +103,7 @@ export default function CompleteProfile() {
         const result = await LocalAuthentication.authenticateAsync({
           promptMessage: "Xác nhận vân tay để hoàn tất đăng ký",
           fallbackLabel: "Sử dụng mật khẩu",
+          cancelLabel: "Hủy",
         });
 
         if (!result.success) {
@@ -153,12 +115,53 @@ export default function CompleteProfile() {
           setIsSaving(false);
           return;
         }
+        console.log("[Save] Biometric authentication successful!");
+      } else {
+        console.log("[Save] Biometric not available, skipping...");
       }
 
       // ========================================
-      // STEP 5: Navigate to tabs
+      // STEP 2: Update Clerk user with name (but NOT onboardingComplete yet)
       // ========================================
-      console.log("[Save] Step 5: Complete! Navigating to tabs...");
+      console.log("[Save] Step 2: Updating Clerk user name...");
+      await user?.update({
+        firstName: fn,
+        lastName: ln,
+      });
+
+      // ========================================
+      // STEP 3: Sync to backend
+      // ========================================
+      console.log("[Save] Step 3: Syncing to backend...");
+      const synced = await syncUserToBackend(fn, ln);
+      
+      if (!synced) {
+        Alert.alert("Lỗi", "Không thể đồng bộ dữ liệu. Vui lòng thử lại.");
+        setIsSaving(false);
+        return;
+      }
+
+      // ========================================
+      // STEP 4: Set onboardingComplete = true (AFTER biometric & sync)
+      // ========================================
+      console.log("[Save] Step 4: Setting onboardingComplete...");
+      await user?.update({
+        unsafeMetadata: {
+          ...user.unsafeMetadata,
+          onboardingComplete: true,
+        },
+      });
+
+      // ========================================
+      // STEP 5: Reload user data to get fresh metadata
+      // ========================================
+      console.log("[Save] Step 5: Reloading user data...");
+      await user?.reload();
+
+      // ========================================
+      // STEP 6: Navigate to tabs
+      // ========================================
+      console.log("[Save] Step 6: Complete! Navigating to tabs...");
       router.replace("/(tabs)");
       
     } catch (err: any) {

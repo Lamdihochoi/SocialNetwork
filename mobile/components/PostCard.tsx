@@ -2,7 +2,7 @@ import { Post, User } from "@/types";
 import { formatDate, formatNumber } from "@/utils/formatters";
 import { AntDesign, Feather, Ionicons } from "@expo/vector-icons";
 import { View, Text, Alert, Image, TouchableOpacity, Modal } from "react-native";
-import { useState } from "react";
+import { useState, memo } from "react";
 // Use legacy API for downloadAsync (Expo SDK 54+)
 import * as FileSystem from "expo-file-system/legacy";
 import * as Sharing from "expo-sharing";
@@ -12,10 +12,15 @@ interface PostCardProps {
   onLike: (postId: string) => void;
   onDelete: (postId: string) => void;
   onComment: (post: Post) => void;
+  onPress?: (post: Post) => void; // Navigate to post detail
   onFollow?: (userId: string) => void;
   onBookmark?: (postId: string) => void;
+  onProfilePress?: (userId: string) => void; // Navigate to user profile
+  onShare?: (post: Post) => void; // 📤 Share post to chat
   isLiked?: boolean;
   isBookmarked?: boolean;
+  isFollowing?: boolean; // ⚡ Follow status from useFollow hook
+  isOnline?: boolean; // ⚡ Real online status from Socket
   currentUser: User;
 }
 
@@ -25,18 +30,27 @@ const PostCard = ({
   onLike,
   onFollow,
   onBookmark,
+  onPress,
+  onProfilePress,
+  onShare,
   post,
   isLiked,
   isBookmarked,
+  isFollowing = false, // ⚡ Use prop from parent (useFollow hook)
+  isOnline,
   onComment,
 }: PostCardProps) => {
   const isOwnPost = post?.user?._id === currentUser?._id;
-  // Check if current user is following this post's author
-  const isFollowing = currentUser?.following?.some(
-    (f: any) => (typeof f === "string" ? f : f._id) === post?.user?._id
-  ) || false;
+  
   const [imageModalVisible, setImageModalVisible] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
+
+  // Handle profile navigation
+  const handleProfilePress = () => {
+    if (onProfilePress && post?.user?._id) {
+      onProfilePress(post.user._id);
+    }
+  };
 
   const handleDelete = () => {
     Alert.alert("Xóa bài viết", "Bạn có chắc chắn muốn xóa bài viết này không?", [
@@ -49,6 +63,7 @@ const PostCard = ({
     ]);
   };
 
+  // ⚡ INSTANT: Toggle follow (UI update handled by useFollow hook)
   const handleFollow = () => {
     if (onFollow && post?.user?._id) {
       onFollow(post.user._id);
@@ -98,14 +113,20 @@ const PostCard = ({
       }}>
         {/* Header */}
         <View className="flex-row items-center p-4 pb-3">
-          <View className="relative">
-            <Image
-              source={{ uri: post?.user?.profilePicture || "https://placehold.co/100x100?text=User" }}
-              className="w-12 h-12 rounded-full"
-              style={{ borderWidth: 2, borderColor: "#f0f0f0" }}
-            />
-            <View className="absolute -bottom-1 -right-1 w-4 h-4 bg-green-400 rounded-full border-2 border-white" />
-          </View>
+          {/* ⚡ Clickable Avatar with Online Status */}
+          <TouchableOpacity onPress={handleProfilePress} activeOpacity={0.7}>
+            <View className="relative">
+              <Image
+                source={{ uri: post?.user?.profilePicture || "https://placehold.co/100x100?text=User" }}
+                className="w-12 h-12 rounded-full"
+                style={{ borderWidth: 2, borderColor: "#f0f0f0" }}
+              />
+              {/* ⚡ Online indicator - only show when user is online */}
+              {isOnline && (
+                <View className="absolute -bottom-1 -right-1 w-4 h-4 bg-green-500 rounded-full border-2 border-white" />
+              )}
+            </View>
+          </TouchableOpacity>
           
           <View className="flex-1 ml-3">
             <View className="flex-row items-center">
@@ -130,28 +151,37 @@ const PostCard = ({
               <Feather name="more-horizontal" size={18} color="#9ca3af" />
             </TouchableOpacity>
           ) : (
-            <TouchableOpacity 
-              onPress={handleFollow}
-              className={`px-4 py-1.5 rounded-full ${
-                isFollowing ? "bg-gray-100 border border-gray-200" : "bg-blue-500"
-              }`}
-            >
-              <Text className={`text-sm font-semibold ${
-                isFollowing ? "text-gray-700" : "text-white"
-              }`}>
-                {isFollowing ? "Đang theo" : "Theo dõi"}
-              </Text>
-            </TouchableOpacity>
+            // Replaced with the new structure
+            !isOwnPost && (
+              <TouchableOpacity
+                onPress={handleFollow}
+                className={`px-4 py-1.5 rounded-full ${
+                  isFollowing ? "bg-gray-200" : "bg-blue-500"
+                }`}
+              >
+                <Text
+                  className={`font-semibold text-sm ${
+                    isFollowing ? "text-gray-700" : "text-white"
+                  }`}
+                >
+                  {isFollowing ? "Đang theo dõi" : "Theo dõi"}
+                </Text>
+              </TouchableOpacity>
+            )
           )}
         </View>
 
-        {/* Content */}
+        {/* Content - Clickable to navigate to post detail */}
         {post.content && (
-          <View className="px-4 pb-3">
+          <TouchableOpacity 
+            className="px-4 pb-3"
+            onPress={() => onPress?.(post)}
+            activeOpacity={0.7}
+          >
             <Text className="text-gray-800 text-[15px] leading-6">
               {post.content}
             </Text>
-          </View>
+          </TouchableOpacity>
         )}
 
         {/* Image - Tap to view/save */}
@@ -227,7 +257,10 @@ const PostCard = ({
             </View>
           </TouchableOpacity>
 
-          <TouchableOpacity className="py-2 px-2">
+          <TouchableOpacity 
+            className="py-2 px-2"
+            onPress={() => onShare?.(post)}
+          >
             <View className="w-8 h-8 bg-purple-50 rounded-full items-center justify-center">
               <Ionicons name="share-social-outline" size={16} color="#a855f7" />
             </View>
@@ -293,4 +326,5 @@ const PostCard = ({
   );
 };
 
-export default PostCard;
+// ⚡ PERFORMANCE: Wrap with React.memo to prevent unnecessary re-renders
+export default memo(PostCard);

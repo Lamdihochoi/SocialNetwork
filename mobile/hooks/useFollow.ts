@@ -1,38 +1,33 @@
-import { useState } from "react";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Alert } from "react-native";
 import { useApiClient, userApi } from "../utils/api";
-import { useQueryClient } from "@tanstack/react-query";
+import { useState, useCallback } from "react";
 
 export const useFollow = () => {
   const api = useApiClient();
   const queryClient = useQueryClient();
-  const [loading, setLoading] = useState(false);
+  
+  // ⚡ LOCAL STATE: Track follow status for INSTANT UI update
+  const [localFollowingIds, setLocalFollowingIds] = useState<Set<string>>(new Set());
+  const [toggledIds, setToggledIds] = useState<Set<string>>(new Set()); // Track which IDs we've toggled
 
-  /**
-   * Hàm này dùng để Follow hoặc Unfollow một user
-   * @param targetUserId ID của người muốn follow/unfollow
-   */
-  const toggleFollow = async (targetUserId: string) => {
-    if (!targetUserId) {
-      console.log("[useFollow] No targetUserId provided");
-      return false;
-    }
-
-    setLoading(true);
-    try {
-      console.log("[useFollow] Calling follow API for user:", targetUserId);
+  // ⚡ OPTIMISTIC: Follow/Unfollow responds instantly
+  const followMutation = useMutation({
+    mutationFn: (targetUserId: string) => userApi.followUser(api, targetUserId),
+    onSuccess: (data) => {
+      // ⚡ Background sync - don't block UI
+      queryClient.invalidateQueries({ queryKey: ["authUser"] });
+      queryClient.invalidateQueries({ queryKey: ["posts"] });
+    },
+    onError: (error: any, targetUserId) => {
+      console.error("[useFollow] Error:", error?.message);
       
-      // Gọi API (Backend đã xử lý logic tự động: chưa follow -> follow, đã follow -> unfollow)
-      const response = await userApi.followUser(api, targetUserId);
-      console.log("[useFollow] Success:", response.data);
-
-      // Invalidate related queries to refresh data
-      await queryClient.invalidateQueries({ queryKey: ["posts"] });
-      await queryClient.invalidateQueries({ queryKey: ["authUser"] });
-      
-      return true;
-    } catch (error: any) {
-      console.error("[useFollow] Error:", error?.response?.status, error?.response?.data || error.message);
+      // ⚡ Rollback local state on error
+      setToggledIds(prev => {
+        const next = new Set(prev);
+        next.delete(targetUserId);
+        return next;
+      });
       
       if (error?.response?.status === 401) {
         Alert.alert("Lỗi xác thực", "Phiên đăng nhập đã hết hạn. Vui lòng đăng nhập lại.");
@@ -41,11 +36,69 @@ export const useFollow = () => {
       } else {
         Alert.alert("Lỗi", "Không thể thực hiện thao tác follow lúc này.");
       }
-      return false;
-    } finally {
-      setLoading(false);
-    }
-  };
+    },
+  });
 
-  return { toggleFollow, loading };
+  // ⚡ INSTANT: Toggle with immediate local update (like the like button)
+  const toggleFollow = useCallback(async (targetUserId: string): Promise<boolean> => {
+    if (!targetUserId) return false;
+
+    // ⚡ Update local state IMMEDIATELY - no waiting
+    setToggledIds(prev => {
+      const next = new Set(prev);
+      if (next.has(targetUserId)) {
+        next.delete(targetUserId);
+      } else {
+        next.add(targetUserId);
+      }
+      return next;
+    });
+
+    // ⚡ Also update query data optimistically
+    queryClient.setQueryData(["authUser"], (old: any) => {
+      if (!old) return old;
+      const currentFollowing = old.following || [];
+      const isCurrentlyFollowing = currentFollowing.some(
+        (f: any) => (typeof f === "string" ? f : f._id) === targetUserId
+      );
+      
+      return {
+        ...old,
+        following: isCurrentlyFollowing
+          ? currentFollowing.filter((f: any) => (typeof f === "string" ? f : f._id) !== targetUserId)
+          : [...currentFollowing, { _id: targetUserId }],
+        followingCount: isCurrentlyFollowing 
+          ? (old.followingCount || 0) - 1 
+          : (old.followingCount || 0) + 1,
+      };
+    });
+
+    // Fire mutation in background (don't await)
+    followMutation.mutate(targetUserId);
+    
+    return true;
+  }, [followMutation, queryClient]);
+
+  // ⚡ Check if following (uses local toggle state for instant response)
+  const isFollowing = useCallback((targetUserId: string, serverFollowing: any[] = []): boolean => {
+    // If we've toggled this ID locally, use toggled state
+    if (toggledIds.has(targetUserId)) {
+      // Check server state and return opposite (since it's toggled)
+      const serverIsFollowing = serverFollowing.some(
+        (f: any) => (typeof f === "string" ? f : f._id) === targetUserId
+      );
+      return !serverIsFollowing;
+    }
+    
+    // Otherwise use server state
+    return serverFollowing.some(
+      (f: any) => (typeof f === "string" ? f : f._id) === targetUserId
+    );
+  }, [toggledIds]);
+
+  return { 
+    toggleFollow, 
+    isFollowing,
+    loading: followMutation.isPending,
+  };
 };

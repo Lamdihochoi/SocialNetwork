@@ -28,17 +28,17 @@ conversationSchema.pre("save", function (next) {
     return next(new Error("Conversation must have exactly 2 participants"));
   }
   // Sort participants to ensure uniqueness
-  this.participants.sort();
+  this.participants.sort((a, b) => a.toString().localeCompare(b.toString()));
   next();
 });
 
-// Create unique index on participants to prevent duplicate conversations
-conversationSchema.index({ participants: 1 }, { unique: true });
+// ⚠️ KHÔNG dùng unique index trên array field vì MongoDB xử lý sai
+// Thay vào đó, logic duplicate được xử lý ở controller
 
-// Index for faster queries
-conversationSchema.index({ "participants": 1, "lastMessageAt": -1 });
+// Index for faster queries - không unique
+conversationSchema.index({ participants: 1 });
+conversationSchema.index({ lastMessageAt: -1 });
 
 const Conversation = mongoose.model("Conversation", conversationSchema);
 
 export default Conversation;
-

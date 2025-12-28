@@ -9,9 +9,11 @@ export const createApiClient = (
 ): AxiosInstance => {
   const api = axios.create({
     baseURL: API_BASE_URL,
+    timeout: 15000, // ⚡ 15s timeout cho requests thường
     headers: {
       "User-Agent": "SocialNetworkApp/1.0 (ReactNative)",
       Accept: "application/json",
+      "Connection": "keep-alive", // ⚡ Keep connection open for faster requests
     },
   });
 
@@ -153,4 +155,20 @@ export const messageApi = {
   // Mark messages as read
   markAsRead: (api: AxiosInstance, conversationId: string) =>
     api.put(`/messages/${conversationId}/read`),
+
+  // ✏️ Edit message
+  editMessage: (api: AxiosInstance, messageId: string, content: string) =>
+    api.patch(`/messages/edit/${messageId}`, { content }),
+
+  // 🗑️ Delete message
+  deleteMessage: (api: AxiosInstance, messageId: string) =>
+    api.delete(`/messages/${messageId}`),
+
+  // 🗑️ Delete entire conversation
+  deleteConversation: (api: AxiosInstance, conversationId: string) =>
+    api.delete(`/messages/conversation/${conversationId}`),
+
+  // 🧹 Clear all messages in conversation
+  clearConversation: (api: AxiosInstance, conversationId: string) =>
+    api.delete(`/messages/conversation/${conversationId}/clear`),
 };

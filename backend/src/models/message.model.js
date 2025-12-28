@@ -23,13 +23,28 @@ const messageSchema = new mongoose.Schema(
       type: String,
       default: "",
     },
-    // 🏷️ Bổ sung: Loại tin nhắn (text, image, video, file...)
+    // 🏷️ Bổ sung: Loại tin nhắn (text, image, video, file, sticker)
     messageType: {
       type: String,
-      enum: ["text", "image", "video", "file"],
+      enum: ["text", "image", "video", "file", "sticker"],
       default: "text",
     },
-    // 📎 Bổ sung: File attachment (Image, PDF, Word, etc.)
+    // 🎨 Sticker support
+    sticker: {
+      packId: {
+        type: String,
+        default: "",
+      },
+      stickerId: {
+        type: String,
+        default: "",
+      },
+      url: {
+        type: String,
+        default: "",
+      },
+    },
+    // 📎 Bổ sung: File attachment (Image, PDF, Word, Video, etc.)
     attachment: {
       url: {
         type: String,
@@ -48,16 +63,43 @@ const messageSchema = new mongoose.Schema(
         type: Number,
         default: 0,
       },
+      // Video-specific fields
+      duration: {
+        type: Number,
+        default: 0,
+      },
+      thumbnail: {
+        type: String,
+        default: "",
+      },
     },
     // 👁️ Bổ sung: Trạng thái đã đọc (QUAN TRỌNG để hiện chấm đỏ)
     isRead: {
       type: Boolean,
       default: false,
     },
+    // 📅 Thời gian đọc tin nhắn
+    readAt: {
+      type: Date,
+      default: null,
+    },
     // 🗑️ Bổ sung: Trạng thái thu hồi tin nhắn (Soft delete)
     isDeleted: {
       type: Boolean,
       default: false,
+    },
+    deletedAt: {
+      type: Date,
+      default: null,
+    },
+    // ✏️ Bổ sung: Trạng thái đã chỉnh sửa
+    isEdited: {
+      type: Boolean,
+      default: false,
+    },
+    editedAt: {
+      type: Date,
+      default: null,
     },
     conversation: {
       type: mongoose.Schema.Types.ObjectId,

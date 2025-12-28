@@ -10,7 +10,8 @@ export const getPosts = async (req, res) => {
   try {
     // ✅ Tối ưu: lean() để trả về plain object, limit để không load quá nhiều
     const posts = await Post.find()
-      .populate("user", "username firstName lastName profilePicture followers")
+      .populate("user", "username firstName lastName profilePicture followers clerkId")
+      .populate("comments", "_id") // 📝 Populate comments để đếm số lượng
       .sort({ createdAt: -1 })
       .limit(50) // Chỉ load 50 bài viết mới nhất
       .lean(); // Trả về plain object, nhanh hơn 3-5x
@@ -56,7 +57,8 @@ export const getUserPosts = async (req, res) => {
 
     // ✅ Tối ưu với lean() và limit
     const posts = await Post.find({ user: user._id })
-      .populate("user", "username firstName lastName profilePicture followers")
+      .populate("user", "username firstName lastName profilePicture followers clerkId")
+      .populate("comments", "_id") // 📝 Populate comments để đếm số lượng
       .sort({ createdAt: -1 })
       .limit(30)
       .lean();
@@ -120,6 +122,14 @@ export const createPost = asyncHandler(async (req, res) => {
     image: imageUrl,
   });
 
+  // ⚡ REALTIME: Emit new_post event to all clients
+  if (req.io) {
+    const populatedPost = await Post.findById(post._id)
+      .populate("user", "username firstName lastName profilePicture followers")
+      .lean();
+    req.io.emit("new_post", populatedPost);
+  }
+
   res.status(201).json({ post });
 });
 
@@ -148,13 +158,32 @@ export const likePost = asyncHandler(async (req, res) => {
 
     // create notification if not liking own post
     if (post.user.toString() !== user._id.toString()) {
-      await Notification.create({
+      const notification = await Notification.create({
         from: user._id,
         to: post.user,
         type: "like",
         post: postId,
       });
+
+      // ⚡ REALTIME: Emit notification to post owner
+      if (req.io) {
+        const populatedNotification = await Notification.findById(notification._id)
+          .populate("from", "username firstName lastName profilePicture")
+          .populate("post", "content image")
+          .lean();
+        req.io.to(`user_${post.user}`).emit("new_notification", populatedNotification);
+      }
     }
+  }
+
+  // ⚡ REALTIME: Emit like update to all clients
+  if (req.io) {
+    req.io.emit("post_liked", { 
+      postId, 
+      userId: user._id.toString(), 
+      isLiked: !isLiked,
+      likesCount: isLiked ? post.likes.length - 1 : post.likes.length + 1
+    });
   }
 
   res.status(200).json({
@@ -183,6 +212,11 @@ export const deletePost = asyncHandler(async (req, res) => {
 
   // delete the post
   await Post.findByIdAndDelete(postId);
+
+  // ⚡ REALTIME: Emit post deleted to all clients
+  if (req.io) {
+    req.io.emit("post_deleted", { postId });
+  }
 
   res.status(200).json({ message: "Post deleted successfully" });
 });

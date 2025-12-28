@@ -47,13 +47,13 @@ export default function Login() {
       } else {
         // Handle other statuses if needed
         console.error("Login status:", signInAttempt.status);
-        Alert.alert("Login Failed", "Untracked login status: " + signInAttempt.status);
+        Alert.alert("Đăng nhập thất bại", "Trạng thái không xác định: " + signInAttempt.status);
         setIsLoading(false);
       }
     } catch (err: any) {
       setIsLoading(false);
       console.error("Login error:", err);
-      Alert.alert("Error", err.errors ? err.errors[0].message : err.message);
+      Alert.alert("Lỗi", err.errors ? err.errors[0].message : err.message);
     }
   };
 
@@ -73,13 +73,13 @@ export default function Login() {
         // Router will handle navigation
       } else {
         console.error("MFA status:", signInAttempt.status);
-        Alert.alert("MFA Failed", "Verification incomplete. Status: " + signInAttempt.status);
+        Alert.alert("Xác thực thất bại", "Xác thực chưa hoàn tất. Trạng thái: " + signInAttempt.status);
         setIsLoading(false);
       }
     } catch (err: any) {
       setIsLoading(false);
       console.error("MFA error:", err);
-      Alert.alert("Error", err.errors ? err.errors[0].message : err.message);
+      Alert.alert("Lỗi", err.errors ? err.errors[0].message : err.message);
     }
   };
 
@@ -91,12 +91,12 @@ export default function Login() {
       >
         <View className="mb-8">
           <Text className="text-3xl font-bold text-black mb-2">
-            {currentStep === "email_password" ? "Welcome Back" : "Verify It's You"}
+            {currentStep === "email_password" ? "Chào mừng trở lại" : "Xác thực danh tính"}
           </Text>
           <Text className="text-gray-500">
             {currentStep === "email_password"
-              ? "Please sign in to your account"
-              : "Enter the code sent to your email"}
+              ? "Vui lòng đăng nhập vào tài khoản của bạn"
+              : "Nhập mã xác thực đã gửi đến email của bạn"}
           </Text>
         </View>
 
@@ -107,17 +107,17 @@ export default function Login() {
               <TextInput
                 autoCapitalize="none"
                 value={emailAddress}
-                placeholder="Enter your email"
+                placeholder="Nhập email của bạn"
                 onChangeText={setEmailAddress}
                 className="w-full bg-gray-50 border border-gray-300 rounded-xl px-4 py-3 text-base"
               />
             </View>
 
             <View>
-              <Text className="mb-1 text-gray-700 font-medium">Password</Text>
+              <Text className="mb-1 text-gray-700 font-medium">Mật khẩu</Text>
               <TextInput
                 value={password}
-                placeholder="Enter your password"
+                placeholder="Nhập mật khẩu của bạn"
                 secureTextEntry={true}
                 onChangeText={setPassword}
                 className="w-full bg-gray-50 border border-gray-300 rounded-xl px-4 py-3 text-base"
@@ -132,14 +132,22 @@ export default function Login() {
               {isLoading ? (
                 <ActivityIndicator color="#fff" />
               ) : (
-                <Text className="text-white font-bold text-lg">Sign In</Text>
+                <Text className="text-white font-bold text-lg">Đăng nhập</Text>
               )}
+            </TouchableOpacity>
+
+            {/* Forgot Password Link */}
+            <TouchableOpacity
+              onPress={() => router.push("/(auth)/forgot-password" as any)}
+              className="items-center mt-3"
+            >
+              <Text className="text-blue-500 font-medium">Quên mật khẩu?</Text>
             </TouchableOpacity>
 
             <View className="flex-row justify-center mt-4">
                <Link href="/(auth)" asChild>
                   <TouchableOpacity>
-                     <Text className="text-gray-500">Go back</Text>
+                     <Text className="text-gray-500">Quay lại</Text>
                   </TouchableOpacity>
                </Link>
             </View>
@@ -149,7 +157,7 @@ export default function Login() {
         {currentStep === "mfa" && (
           <View className="gap-4">
             <View>
-              <Text className="mb-1 text-gray-700 font-medium">Verification Code</Text>
+              <Text className="mb-1 text-gray-700 font-medium">Mã xác thực</Text>
               <TextInput
                 value={code}
                 placeholder="123456"
@@ -167,7 +175,7 @@ export default function Login() {
               {isLoading ? (
                 <ActivityIndicator color="#fff" />
               ) : (
-                <Text className="text-white font-bold text-lg">Verify & Sign In</Text>
+                <Text className="text-white font-bold text-lg">Xác thực & Đăng nhập</Text>
               )}
             </TouchableOpacity>
           
@@ -178,7 +186,7 @@ export default function Login() {
                }}
                className="items-center mt-4"
             >
-               <Text className="text-blue-500 font-medium">Back to Login</Text>
+               <Text className="text-blue-500 font-medium">Quay lại Đăng nhập</Text>
             </TouchableOpacity>
           </View>
         )}

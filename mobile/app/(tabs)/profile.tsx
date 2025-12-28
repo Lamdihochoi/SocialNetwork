@@ -24,10 +24,12 @@ import {
   useSafeAreaInsets,
 } from "react-native-safe-area-context";
 import PostCard from "@/components/PostCard";
+import { useRouter } from "expo-router";
 
 const ProfileScreens = () => {
   const { currentUser, isLoading } = useCurrentUser();
   const insets = useSafeAreaInsets();
+  const router = useRouter();
   const [followModalVisible, setFollowModalVisible] = useState(false);
   const [followModalType, setFollowModalType] = useState<"followers" | "following">("followers");
   const [activeTab, setActiveTab] = useState<"posts" | "saved" | "likes">("posts");
@@ -267,6 +269,7 @@ const ProfileScreens = () => {
                     onDelete={deletePost}
                     onBookmark={toggleBookmark}
                     onComment={() => {}}
+                    onPress={(post: any) => router.push(`/post/${post._id}`)}
                     currentUser={currentUser}
                     isLiked={checkIsLiked(post.likes, currentUser)}
                     isBookmarked={true}

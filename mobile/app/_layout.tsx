@@ -10,7 +10,30 @@ import { StatusBar } from "expo-status-bar";
 import { SocketProvider } from "@/context/SocketContext";
 import { UnreadProvider } from "@/context/UnreadContext";
 
-const queryClient = new QueryClient();
+const queryClient = new QueryClient({
+  defaultOptions: {
+    queries: {
+      // ⚡ OPTIMIZED: Data fresh hơn cho realtime feel
+      staleTime: 1000 * 30, // 30 giây - ngắn hơn để data always fresh
+      // Giữ cache trong 10 phút sau khi không còn sử dụng
+      gcTime: 1000 * 60 * 10,
+      // Retry 1 lần nếu lỗi
+      retry: 1,
+      // Không refetch khi focus lại window (mobile không cần)
+      refetchOnWindowFocus: false,
+      // ⚡ BẬT: Sync data khi reconnect mạng
+      refetchOnReconnect: true,
+      // ⚡ Offline-first: Load cache trước, fetch sau
+      networkMode: "offlineFirst",
+    },
+    mutations: {
+      // Retry 1 lần cho mutations
+      retry: 1,
+      // ⚡ Mutations vẫn hoạt động khi offline
+      networkMode: "offlineFirst",
+    },
+  },
+});
 
 /**
  * MINIMAL AUTH GATE

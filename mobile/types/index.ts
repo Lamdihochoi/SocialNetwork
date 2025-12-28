@@ -63,14 +63,33 @@ export interface Message {
 
   // ✅ Bổ sung để khớp với Backend mới
   image?: string; // Link ảnh (nếu có) - DEPRECATED, use attachment instead
-  messageType?: "text" | "image" | "video" | "file"; // Loại tin nhắn
+  messageType?: "text" | "image" | "video" | "file" | "sticker"; // Loại tin nhắn
   isRead?: boolean; // Trạng thái đã xem
+  
+  // 🎨 Sticker support
+  sticker?: {
+    packId: string;
+    stickerId: string;
+    emoji?: string; // The emoji character
+    url?: string;
+  };
+  
+  // 📎 Attachment (file, image, video)
   attachment?: {
     url: string;
     type: "image" | "video" | "file" | "text";
     fileName?: string;
     fileSize?: number;
+    // Video-specific fields
+    duration?: number;
+    thumbnail?: string;
   };
+  
+  // ✏️🗑️ Edit/Delete support
+  isEdited?: boolean;
+  editedAt?: string;
+  isDeleted?: boolean;
+  deletedAt?: string;
 }
 
 // 6. Định nghĩa Conversation (Cuộc trò chuyện)

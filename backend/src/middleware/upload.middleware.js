@@ -13,10 +13,11 @@ const fileFilter = (req, file, cb) => {
   }
 };
 
-// File filter for messages (images, PDFs, Word docs)
+// File filter for messages (images, videos, PDFs, Word docs)
 const messageFileFilter = (req, file, cb) => {
   const allowedMimes = [
     "image/", // All image types
+    "video/", // All video types (mp4, mov, etc.)
     "application/pdf", // PDF
     "application/msword", // .doc
     "application/vnd.openxmlformats-officedocument.wordprocessingml.document", // .docx
@@ -31,7 +32,7 @@ const messageFileFilter = (req, file, cb) => {
   } else {
     cb(
       new Error(
-        "Only image, PDF, and Word documents are allowed for messages"
+        "Only image, video, PDF, and Word documents are allowed for messages"
       ),
       false
     );
@@ -44,11 +45,11 @@ const upload = multer({
   limits: { fileSize: 5 * 1024 * 1024 }, // 5MB limit
 });
 
-// Upload middleware for messages (supports more file types, larger size)
+// Upload middleware for messages (supports more file types, larger size for videos)
 export const uploadMessage = multer({
   storage: storage,
   fileFilter: messageFileFilter,
-  limits: { fileSize: 10 * 1024 * 1024 }, // 10MB limit for messages
+  limits: { fileSize: 50 * 1024 * 1024 }, // 50MB limit for messages (videos can be large)
 });
 
 // Upload middleware for profile updates (profile picture + banner image)
